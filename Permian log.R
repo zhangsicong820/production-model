@@ -353,6 +353,9 @@ for (i in 1:15) {
   permian_last = permian[last_prod_date == prod_date, ]
   forward_dt = permian_last[entity_id %in% forward[, entity_id], ]
   
+  # entities whose liq would remain constant.
+  const_forward_dt = permian_last[!(entity_id %in% forward[, entity_id]), ]
+  
   # Making forward projection parallelly.
   # Cluster need to be set before.
   forward_liq_proj = foreach(j = 1:nrow(forward_dt), .combine = c, .packages = 'data.table') %dopar%
@@ -368,27 +371,29 @@ for (i in 1:15) {
   temp_permian_forward[, comment:= "Inserted"]
   temp_permian_forward[, liq:= forward_liq_proj]
   
+
+  ### data table to store all the entities with constant forward production.
+  temp_permian_const = const_forward_dt
+  const_liq = const_forward_dt[, liq] # use the last availale data as the production.
+  
+  temp_permian_const[, last_prod_date:= as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  temp_permian_const[, n_mth:= (n_mth + 1)]
+  temp_permian_const[, prod_date:= as.character(format(as.Date(prod_date)+32,'%Y-%m-01'))]
+  temp_permian_const[, comment:= "Inserted"]
+  temp_permian_const[, liq:= const_liq]
+  
   # Update the last_prod_date for all the entities.
-  permian[entity_id %in% forward_dt[,entity_id], last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  #permian[entity_id %in% forward_dt[,entity_id], last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  permian[, last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  
   
   # Append the forward prediction in original data set.
   permian = rbindlist(list(permian, temp_permian_forward))
+  permian = rbindlist(list(permian, temp_permian_const))
   setkey(permian, entity_id, basin, first_prod_year)
   cat(sprintf('Congratulations! Iteration %i runs successfully...\n', i))
   cat(sprintf('Interation finished at %s...\n', as.character(Sys.time())))
 }
-
-## Keep constant for wells whose production is less than 20 but greater than zero.
-# constant_prod <- sqldf("with t0 as (
-#                        select entity_id, avg(liq) as avg
-#                        from permian
-#                        group by entity_id)
-#                        
-#                        select *
-#                        from permian
-#                        where entity_id in (select entity_id from t0 where avg < 20 and avg > 0) and prod_date = last_prod_date")
-# 
-# constant_permian_forward = sqldf("select * from forward_dt limit 0")
 
 
 ###
@@ -537,6 +542,32 @@ first_prod <- dbGetQuery(base, "select prod_date, round(sum(liq)/1000/(extract(d
 
 new_first_prod <- as.data.frame(matrix(nrow = 15, ncol = 2));
 colnames(new_first_prod)<-c('prod_date', 'prod');
+
+
+#----------------------------------------------------------------------------------------#
+### Calculate the state average decline rate.
+monthly_prod = plyr::ddply(permian, .(prod_date, basin), summarise, basin_prod = sum(liq)/1000) %>>% as.data.table()
+# Using the last five months production to calulate their weights.
+prod_subset = monthly_prod[(prod_date <= '2015-11-01' & prod_date >= '2015-06-01'), ]
+prod_subset[, basin_prod := basin_prod/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days"))]
+# Calculate the state total production
+state_total = plyr::ddply(prod_subset, .(prod_date), summarise, state_prod = sum(basin_prod))
+weight = sqldf("select a.*, round(basin_prod/state_prod,6) weight from prod_subset a, state_total b
+               where a.prod_date = b.prod_date")
+# Using the last five months' weights to calculate the average weight.
+avg_weight = plyr::ddply(weight, .(basin), summarise, avg_weight = mean(weight)) %>>%
+  as.data.table()
+
+dcl_weight_avg = dcl
+basin_name_ = avg_weight$basin
+for(i in 1:length(basin_name_)){
+  dcl_weight_avg[basin == basin_name_[i], weighted_avg:= avg*avg_weight[basin == basin_name_[i], avg_weight]]
+}
+
+# calculate the weighted average decline rate for each first_prod_year and n_mth combination.
+dcl_state_avg <- plyr::ddply(dcl_weight_avg, .(first_prod_year, n_mth), summarise, avg = sum(weighted_avg))
+dcl_state_avg <- as.data.table(dcl_state_avg)
+setkey(dcl_state_avg, first_prod_year, n_mth)
 
 ## prod from new wells and 15 month forward
 
