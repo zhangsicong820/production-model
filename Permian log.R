@@ -23,6 +23,10 @@ permian <- mutate(permian, comment = "")
 permian$last_prod_date <- as.Date(permian$last_prod_date)
 permian$prod_date <- as.Date(permian$prod_date)
 
+## choose the max date of available data
+cutoff_date <- as.Date(dbGetQuery(base, "select max(prod_date) as max from dev.zsz_permian_dec")$max)
+
+
 ## Change data struture into data.table
 permian <- as.data.table(permian)
 ## Set keys for faster searching.
@@ -166,7 +170,7 @@ missing <- sqldf("with t0 as (
                  from permian
                  where entity_id in (select entity_id from t0 where avg >= 20) and prod_date = last_prod_date")
 
-missing <- subset(missing, last_prod_date < '2015-12-01')
+missing <- subset(missing, last_prod_date < cutoff_date)
 missing <- as.data.table(missing)
 setkey(missing, entity_id, basin, first_prod_year)
 missing[, last_prod_date := as.character(last_prod_date)]
@@ -213,11 +217,11 @@ for (i in 1:nrow(missing)) {
     # j = 0
     for(j in 1:5)
     {
-      if(toDate(temp[, prod_date], j) > as.Date('2015-11-01'))
+      if(toDate(temp[, prod_date], j) >= cutoff_date)
       {
         break
       }
-      if(toDate(temp[, prod_date], j) <= as.Date('2015-11-01'))
+      if(toDate(temp[, prod_date], j) < cutoff_date)
       {
         n = nrow(permian)
         permian[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[, last_prod_date], j)]
@@ -248,11 +252,11 @@ for (i in 1:nrow(missing)) {
     # j = 1
     for(j in 1:5)
     {
-      if(toDate(temp[, prod_date], j) > as.Date('2015-11-01'))
+      if(toDate(temp[, prod_date], j) >= cutoff_date)
       {
         break
       }
-      if(toDate(temp[, prod_date], j) <= as.Date('2015-11-01'))
+      if(toDate(temp[, prod_date], j) < cutoff_date)
       {
         n = nrow(permian)
         permian[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[,last_prod_date], j)]
@@ -536,7 +540,7 @@ colnames(new_first_prod)<-c('prod_date', 'prod');
 
 ## prod from new wells and 15 month forward
 
-i = 2
+
 for (i in 1:20) {
   if(as.Date(format(as.Date(max(hist_prod$prod_date))+32,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
   {
@@ -583,9 +587,11 @@ for (i in 1:20) {
         temp[m+1, 1] <- as.character(format(as.Date(temp$prod_date[j])+32,'%Y-%m-01'))
         
         if(j < max(dcl$n_mth[dcl$first_prod_year == max(dcl$first_prod_year)])) {
-          temp[m+1, 2] <- round(temp$prod[m] * ( 1 + dcl$avg[dcl$first_prod_year == max(dcl$first_prod_year) & dcl$n_mth == (j+1)]/100),0)
+          dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == (j + 1), avg]/100)
+          temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
         } else {
-          temp[m+1, 2] <- round(temp$prod[m] * ( 1 + dcl$avg[dcl$first_prod_year == max(dcl$first_prod_year) & dcl$n_mth == max(dcl$n_mth[dcl$first_prod_year == max(dcl$first_prod_year)])]/100),0)
+          dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == max(dcl_state_avg[first_prod_year == max(first_prod_year), n_mth]), avg]/100)
+          temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
         }
       }
     }
