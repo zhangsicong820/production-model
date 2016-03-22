@@ -576,31 +576,37 @@ for (i in 1:20) {
     # update the updated production
     temp <- new_first_prod[i,]
     
-    for (j in 1:20) {
-      if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
-      {
-        break
-      }
-      if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01'))<= as.Date(max(prod$prod_date)))
-      {
-        m = nrow(temp)
-        temp[m+1, 1] <- as.character(format(as.Date(temp$prod_date[j])+32,'%Y-%m-01'))
-        
-        if(j < max(dcl$n_mth[dcl$first_prod_year == max(dcl$first_prod_year)])) {
-          dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == (j + 1), avg]/100)
-          temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
-        } else {
-          dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == max(dcl_state_avg[first_prod_year == max(first_prod_year), n_mth]), avg]/100)
-          temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
+    if(new_first_prod[i,1] <= cutoff_date) {
+      temp <- new_first_prod[i,]
+    } else {
+      for (j in 1:20) {
+        if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
+        {
+          break
+        }
+        if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01'))<= as.Date(max(prod$prod_date)))
+        {
+          m = nrow(temp)
+          temp[m+1, 1] <- as.character(format(as.Date(temp$prod_date[j])+32,'%Y-%m-01'))
+          
+          if(j < max(dcl$n_mth[dcl$first_prod_year == max(dcl$first_prod_year)])) {
+            dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == (j + 1), avg]/100)
+            temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
+          } else {
+            dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == max(dcl_state_avg[first_prod_year == max(first_prod_year), n_mth]), avg]/100)
+            temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
+          }
         }
       }
     }
     
-    temp$prod_date <- as.Date(temp$prod_date)
+    
+    #temp$prod_date <- as.Date(temp$prod_date)
     
     updated_prod <- sqldf("select a.prod_date, a.prod + coalesce(b.prod, 0) as prod
                           from updated_prod a left join temp b on a.prod_date = b.prod_date")
     
+    #sql_query <- sprintf("select * from tbl where col = %s and col2 = %g", var1, var2)
     
     ## new total production
     hist_prod[n+1,1] <- as.character(format(as.Date(hist_prod$prod_date[n]+32),'%Y-%m-01')) 
