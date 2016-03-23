@@ -18,42 +18,42 @@ options("scipen"=100)
 #################################################################################################
 
 ### Loading drilling info data set here.
-permian <- dbGetQuery(base, "select * from dev.zsz_permian_dec")
-permian <- mutate(permian, comment = "")
-permian$last_prod_date <- as.Date(permian$last_prod_date)
-permian$prod_date <- as.Date(permian$prod_date)
+gom <- dbGetQuery(base, "select * from dev.zsz_gom_dec")
+gom <- mutate(gom, comment = "")
+gom$last_prod_date <- as.Date(gom$last_prod_date)
+gom$prod_date <- as.Date(gom$prod_date)
 
 ## choose the max date of available data
-cutoff_date <- as.Date(dbGetQuery(base, "select max(prod_date) as max from dev.zsz_permian_dec")$max)
+cutoff_date <- as.Date(dbGetQuery(base, "select max(prod_date) as max from dev.zsz_gom_dec")$max)
 
 
 ## Change data struture into data.table
-permian <- as.data.table(permian)
+gom <- as.data.table(gom)
 ## Set keys for faster searching.
-setkey(permian, entity_id, basin, first_prod_year)
+setkey(gom, entity_id, basin, first_prod_year)
 
 ### Load decline rate data for all basins here.
-dcl_all <- as.data.table(dbGetQuery(base, "select * from dev.zxw_log_dcl"))
+dcl_all <- as.data.table(dcl_all)
 setkey(dcl_all, basin, first_prod_year)
 ## Find all the basin names for current state.
-basin_name <- unique(permian[, basin])
+basin_name <- unique(gom[, basin])
 ## Subset the decline rate table for faster matching.
 dcl <- dcl_all[basin %in% basin_name, ]
 
 ### Find entity with zero production.
 zero <- sqldf("select entity_id
-              from permian
+              from gom
               where last_prod_date = prod_date and liq = 0")
 
 zero <- as.data.table(zero)
 setkey(zero, entity_id)
 
 ### Load basin maximum production month table.
-#basin_max_mth_tbl = as.data.table(basin_max_mth_table[basin_max_mth_table$basin == "PERMIAN BASIN",])
+#basin_max_mth_tbl = as.data.table(basin_max_mth_table[basin_max_mth_table$basin == "gom BASIN",])
 
 ### Load basin maximum production month table.
-basin_max_mth_tbl <- dbGetQuery(base, "select * from dev.zxw_basin_max_mth")
-basin_max_mth_tbl <- as.data.table(basin_max_mth_tbl)
+
+basin_max_mth_tbl <- as.data.table(basin_max_mth_table)
 
 setkey(basin_max_mth_tbl, basin, first_prod_year)
 
@@ -78,7 +78,7 @@ find_dcl_factor = function(basin_, first_, month_){
 tic_zero = proc.time() # Record the start time...
 for (i in 1:nrow(zero)) {
   #choose prod data for past 6 month
-  temp <- permian[entity_id == zero[i,entity_id],]
+  temp <- gom[entity_id == zero[i,entity_id],]
   temp_entity_id <- temp[1,entity_id]
   temp_basin <- temp[1,basin]
   
@@ -106,49 +106,49 @@ for (i in 1:nrow(zero)) {
       
       if (temp[n_mth == (max_n_mth - 3),liq] == 0) {
         
-        permian[entity_id == temp_entity_id, comment:= "All Zeros"]
+        gom[entity_id == temp_entity_id, comment:= "All Zeros"]
       } else {
         
         temp_liq_lag_2 = (1 + temp[n_mth == (max_n_mth - 3), liq]) * find_dcl_factor(temp_basin, first, dcl_mth - 2) - 1
-        permian[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), liq:= temp_liq_lag_2]
-        permian[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), comment:= "Updated"]
+        gom[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), liq:= temp_liq_lag_2]
+        gom[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), comment:= "Updated"]
         
-        temp_liq_lag_1 = (1 + permian[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), liq]) * find_dcl_factor(temp_basin, first, dcl_mth - 1) - 1
-        permian[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq:= temp_liq_lag_1]
-        permian[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id),comment:="Updated"]
+        temp_liq_lag_1 = (1 + gom[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), liq]) * find_dcl_factor(temp_basin, first, dcl_mth - 1) - 1
+        gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq:= temp_liq_lag_1]
+        gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id),comment:="Updated"]
         
-        temp_liq_lag_0 = (1 + permian[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq])  * find_dcl_factor(temp_basin, first, dcl_mth) - 1
-        permian[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
-        permian[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
+        temp_liq_lag_0 = (1 + gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq])  * find_dcl_factor(temp_basin, first, dcl_mth) - 1
+        gom[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
+        gom[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
       }
     } else {
       
       temp_liq_lag_1 = (1 + temp[n_mth == (max_n_mth - 2), liq]) * find_dcl_factor(temp_basin, first, dcl_mth - 1) - 1
-      permian[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq:= temp_liq_lag_1]
-      permian[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), comment:="Updated"]
+      gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq:= temp_liq_lag_1]
+      gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), comment:="Updated"]
       
-      temp_liq_lag_0 = (1 + permian[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq]) * find_dcl_factor(temp_basin, first, dcl_mth) - 1
-      permian[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
-      permian[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
+      temp_liq_lag_0 = (1 + gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq]) * find_dcl_factor(temp_basin, first, dcl_mth) - 1
+      gom[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
+      gom[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
     }
     
   } else {
     
     temp_liq_lag_0 = (1 + temp[(n_mth == (max_n_mth - 1)), liq]) * find_dcl_factor(temp_basin, first, dcl_mth) - 1
-    permian[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
-    permian[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
+    gom[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
+    gom[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
   }
 }
+
+#test <- subset(gom, comment == "Updated")
+
 
 toc_zero = proc.time() # Record ending time.
 time_usage_zero = toc_zero - tic_zero
 time_usage_zero
-permian_zero = permian # replicate the filled table as a backup
-# permian = permian_zero  # rolling back point
+gom_zero = gom # replicate the filled table as a backup
+# gom = gom_zero  # rolling back point
 
-test <- subset(permian, comment == "Updated")
-
-sqldf("select * from permian where entity_id = '129100916'")
 #-----------------------------------------#
 # Part Two -- Filling the missing values. #
 #-----------------------------------------#
@@ -166,11 +166,11 @@ sqldf("select * from permian where entity_id = '129100916'")
 ## Entity with missing data
 missing <- sqldf("with t0 as (
                  select entity_id, avg(liq) as avg
-                 from permian
+                 from gom
                  group by entity_id)
                  
                  select *
-                 from permian
+                 from gom
                  where entity_id in (select entity_id from t0 where avg >= 20) and prod_date = last_prod_date")
 
 missing <- subset(missing, last_prod_date < cutoff_date)
@@ -180,8 +180,8 @@ missing[, last_prod_date := as.character(last_prod_date)]
 missing[, prod_date := as.character(prod_date)]
 
 ## Change data type for table union.
-permian[, last_prod_date := as.character(last_prod_date)]
-permian[, prod_date := as.character(prod_date)]
+gom[, last_prod_date := as.character(last_prod_date)]
+gom[, prod_date := as.character(prod_date)]
 
 ## Define a function for data type change.
 toDate <- function(date_char, j){
@@ -226,13 +226,13 @@ for (i in 1:nrow(missing)) {
       }
       if(toDate(temp[, prod_date], j) < cutoff_date)
       {
-        n = nrow(permian)
-        permian[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[, last_prod_date], j)]
+        n = nrow(gom)
+        gom[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[, last_prod_date], j)]
         
         if(j == 1) {
           temp_liq = round((1 + temp[, liq]) *find_dcl_factor(temp[, basin], first, dcl_mth) - 1, 0)
         } else {
-          temp_liq = round((1 + permian[n,liq]) * find_dcl_factor(temp[, basin], first, dcl_mth) - 1, 0)
+          temp_liq = round((1 + gom[n,liq]) * find_dcl_factor(temp[, basin], first, dcl_mth) - 1, 0)
         }
         
         # Create a temporary data table to store the generated row.
@@ -245,7 +245,7 @@ for (i in 1:nrow(missing)) {
           "prod_date" = toChar(temp[, prod_date], j),
           "liq" = temp_liq,
           "comment" = "Inserted")
-        permian = rbindlist(list(permian, temp_dt))
+        gom = rbindlist(list(gom, temp_dt))
       }
     }
     
@@ -261,12 +261,12 @@ for (i in 1:nrow(missing)) {
       }
       if(toDate(temp[, prod_date], j) < cutoff_date)
       {
-        n = nrow(permian)
-        permian[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[,last_prod_date], j)]
+        n = nrow(gom)
+        gom[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[,last_prod_date], j)]
         if(j == 1) {
           temp_liq = round((1 + temp[,liq]) * find_dcl_factor(temp_basin, first, dcl_mth + j) - 1, 0)
         } else {
-          temp_liq = round((1 + permian[n, liq]) * find_dcl_factor(temp_basin, first, dcl_mth + j) - 1, 0)
+          temp_liq = round((1 + gom[n, liq]) * find_dcl_factor(temp_basin, first, dcl_mth + j) - 1, 0)
         }
         
         temp_dt = data.table(
@@ -278,7 +278,7 @@ for (i in 1:nrow(missing)) {
           "prod_date" = toChar(temp[,prod_date], j),
           "liq" = temp_liq,
           "comment" = "Inserted")
-        permian = rbindlist(list(permian, temp_dt))
+        gom = rbindlist(list(gom, temp_dt))
       }
     }
   }
@@ -287,7 +287,7 @@ for (i in 1:nrow(missing)) {
 toc_missing = proc.time()
 time_usage_missing = toc_missing - tic_missing
 time_usage_missing
-permian_missing = permian
+gom_missing = gom
 
 #---------------------------------------------#
 # Part Three -- 15 month forward projection   #
@@ -336,13 +336,13 @@ tic_forward = proc.time()
 for (i in 1:15) {
   forward <- sqldf("with t0 as (
                    select entity_id, max(n_mth) as max
-                   from permian
+                   from gom
                    where comment != 'All Zeros'
                    group by entity_id),
                    
                    t1 as (
                    select a.entity_id, avg(liq) as avg
-                   from permian a join t0 b on a.entity_id = b. entity_id
+                   from gom a join t0 b on a.entity_id = b. entity_id
                    where n_mth >= max - 6 and comment != 'All Zeros'
                    group by a.entity_id)
                    
@@ -353,11 +353,11 @@ for (i in 1:15) {
   forward = as.data.table(forward)
   # head(forward)
   
-  permian_last = permian[last_prod_date == prod_date, ]
-  forward_dt = permian_last[entity_id %in% forward[, entity_id], ]
+  gom_last = gom[last_prod_date == prod_date, ]
+  forward_dt = gom_last[entity_id %in% forward[, entity_id], ]
   
   # entities whose liq would remain constant.
-  const_forward_dt = permian_last[!(entity_id %in% forward[, entity_id]), ]
+  const_forward_dt = gom_last[!(entity_id %in% forward[, entity_id]), ]
   
   # Making forward projection parallelly.
   # Cluster need to be set before.
@@ -367,33 +367,33 @@ for (i in 1:15) {
   ### Except liq and last_prod_date, changing the other columns outside the long iterations.
   ## entity_id, basin, first_prod_year remain the same.
   ## Only update values for last_prod_date, n_mth, prod_date, comment
-  temp_permian_forward = forward_dt
-  temp_permian_forward[, last_prod_date:= as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
-  temp_permian_forward[, n_mth:= (n_mth + 1)]
-  temp_permian_forward[, prod_date:= as.character(format(as.Date(prod_date)+32,'%Y-%m-01'))]
-  temp_permian_forward[, comment:= "Inserted"]
-  temp_permian_forward[, liq:= forward_liq_proj]
+  temp_gom_forward = forward_dt
+  temp_gom_forward[, last_prod_date:= as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  temp_gom_forward[, n_mth:= (n_mth + 1)]
+  temp_gom_forward[, prod_date:= as.character(format(as.Date(prod_date)+32,'%Y-%m-01'))]
+  temp_gom_forward[, comment:= "Inserted"]
+  temp_gom_forward[, liq:= forward_liq_proj]
   
-
+  
   ### data table to store all the entities with constant forward production.
-  temp_permian_const = const_forward_dt
+  temp_gom_const = const_forward_dt
   const_liq = const_forward_dt[, liq] # use the last availale data as the production.
   
-  temp_permian_const[, last_prod_date:= as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
-  temp_permian_const[, n_mth:= (n_mth + 1)]
-  temp_permian_const[, prod_date:= as.character(format(as.Date(prod_date)+32,'%Y-%m-01'))]
-  temp_permian_const[, comment:= "Inserted"]
-  temp_permian_const[, liq:= const_liq]
+  temp_gom_const[, last_prod_date:= as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  temp_gom_const[, n_mth:= (n_mth + 1)]
+  temp_gom_const[, prod_date:= as.character(format(as.Date(prod_date)+32,'%Y-%m-01'))]
+  temp_gom_const[, comment:= "Inserted"]
+  temp_gom_const[, liq:= const_liq]
   
   # Update the last_prod_date for all the entities.
-  #permian[entity_id %in% forward_dt[,entity_id], last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
-  permian[, last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  #gom[entity_id %in% forward_dt[,entity_id], last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  gom[, last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
   
   
   # Append the forward prediction in original data set.
-  permian = rbindlist(list(permian, temp_permian_forward))
-  permian = rbindlist(list(permian, temp_permian_const))
-  setkey(permian, entity_id, basin, first_prod_year)
+  gom = rbindlist(list(gom, temp_gom_forward))
+  gom = rbindlist(list(gom, temp_gom_const))
+  setkey(gom, entity_id, basin, first_prod_year)
   cat(sprintf('Congratulations! Iteration %i runs successfully...\n', i))
   cat(sprintf('Interation finished at %s...\n', as.character(Sys.time())))
 }
@@ -405,7 +405,7 @@ stopCluster(cl)
 toc_forward <- proc.time()
 time_usage_forward <- toc_forward - tic_forward
 time_usage_forward
-permian_backup = permian
+gom_backup = gom
 
 
 
@@ -510,7 +510,7 @@ new_prod <- dbGetQuery(base, "select first_prod_date, extract('year' from first_
                        extract('month' from first_prod_date) first_prod_month, 
                        round(sum(liq)/1000/(extract(days from (first_prod_date + interval '1 month' - first_prod_date))),0) as new_prod
                        from di.pden_desc a join di.pden_prod b on a.entity_id = b.entity_id
-                       where liq_cum >0 and prod_date >= '2013-12-01' and ALLOC_PLUS IN ('Y','X') and liq >= 0 and basin = 'PERMIAN BASIN' 
+                       where liq_cum >0 and prod_date >= '2013-12-01' and ALLOC_PLUS IN ('Y','X') and liq >= 0 and basin in ('GOM - DEEPWATER', 'GOM - SHELF')
                        and first_prod_date < date_trunc('month', current_date)::DATE - interval '5 month' and first_prod_date = prod_date
                        group by 1,2,3
                        order by 1,2,3")
@@ -522,7 +522,7 @@ new_prod$first_prod_date <- as.Date(new_prod$first_prod_date)
 hist_prod <- dbGetQuery(base, "select prod_date, round(sum(liq)/1000/(extract(days from (prod_date + interval '1 month' - prod_date))),0) as prod
                         from di.pden_desc a join di.pden_prod b on a.entity_id = b.entity_id
                         where liq_cum >0 and prod_date >= '2013-12-01' and ALLOC_PLUS IN ('Y','X') and liq >= 0 
-                        and basin = 'PERMIAN BASIN' and prod_date < date_trunc('month', current_date)::DATE - interval '5 month'
+                        and basin in ('GOM - DEEPWATER', 'GOM - SHELF') and prod_date < date_trunc('month', current_date)::DATE - interval '5 month'
                         group by prod_date
                         order by 1")
 
@@ -530,7 +530,7 @@ hist_prod$prod_date <- as.Date(hist_prod$prod_date)
 
 ## forward prod from hist wells
 
-prod <-  plyr::ddply(permian, 'prod_date', summarise, sum = sum(liq)/1000)
+prod <-  plyr::ddply(gom, 'prod_date', summarise, sum = sum(liq)/1000)
 
 prod <- mutate(prod, prod = sum/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days")))
 
@@ -539,7 +539,7 @@ updated_prod <- prod[prod$prod_date > max(hist_prod$prod_date),-2]
 first_prod <- dbGetQuery(base, "select prod_date, round(sum(liq)/1000/(extract(days from (prod_date + interval '1 month' - prod_date))),0) as prod
                          from di.pden_desc a join di.pden_prod b on a.entity_id = b.entity_id
                          where liq_cum >0 and prod_date >= '2013-12-01' and ALLOC_PLUS IN ('Y','X') and liq >= 0 
-                         and basin = 'PERMIAN BASIN' and prod_date >= date_trunc('month', current_date)::DATE - interval '5 month' and prod_date = first_prod_date
+                         and basin in ('GOM - DEEPWATER', 'GOM - SHELF') and prod_date >= date_trunc('month', current_date)::DATE - interval '5 month' and prod_date = first_prod_date
                          group by prod_date
                          order by 1")
 
@@ -549,7 +549,7 @@ colnames(new_first_prod)<-c('prod_date', 'prod');
 
 #----------------------------------------------------------------------------------------#
 ### Calculate the state average decline rate.
-monthly_prod = plyr::ddply(permian, .(prod_date, basin), summarise, basin_prod = sum(liq)/1000) %>>% as.data.table()
+monthly_prod = plyr::ddply(gom, .(prod_date, basin), summarise, basin_prod = sum(liq)/1000) %>>% as.data.table()
 # Using the last five months production to calulate their weights.
 prod_subset = monthly_prod[(prod_date <= '2015-11-01' & prod_date >= '2015-06-01'), ]
 prod_subset[, basin_prod := basin_prod/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days"))]
