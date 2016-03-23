@@ -171,7 +171,8 @@ missing <- sqldf("with t0 as (
                  
                  select *
                  from gom
-                 where entity_id in (select entity_id from t0 where avg >= 20) and prod_date = last_prod_date")
+                 where entity_id in (select entity_id from t0 where avg >= 20) and 
+                  prod_date = last_prod_date and last_prod_date != cutoff_date")
 
 missing <- subset(missing, last_prod_date < cutoff_date)
 missing <- as.data.table(missing)
@@ -220,11 +221,11 @@ for (i in 1:nrow(missing)) {
     # j = 0
     for(j in 1:5)
     {
-      if(toDate(temp[, prod_date], j) >= cutoff_date)
+      if(toDate(temp[, prod_date], j) > cutoff_date)
       {
         break
       }
-      if(toDate(temp[, prod_date], j) < cutoff_date)
+      if(toDate(temp[, prod_date], j) <= cutoff_date)
       {
         n = nrow(gom)
         gom[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[, last_prod_date], j)]
@@ -255,11 +256,11 @@ for (i in 1:nrow(missing)) {
     # j = 1
     for(j in 1:5)
     {
-      if(toDate(temp[, prod_date], j) >= cutoff_date)
+      if(toDate(temp[, prod_date], j) > cutoff_date)
       {
         break
       }
-      if(toDate(temp[, prod_date], j) < cutoff_date)
+      if(toDate(temp[, prod_date], j) <= cutoff_date)
       {
         n = nrow(gom)
         gom[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[,last_prod_date], j)]
