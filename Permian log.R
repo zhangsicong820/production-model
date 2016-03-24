@@ -33,7 +33,8 @@ permian <- as.data.table(permian)
 setkey(permian, entity_id, basin, first_prod_year)
 
 ### Load decline rate data for all basins here.
-dcl_all <- as.data.table(dbGetQuery(base, "select * from dev.zxw_log_dcl"))
+#dcl_all <- as.data.table(dbGetQuery(base, "select * from dev.zxw_log_dcl"))
+dcl_all <- as.data.table(dcl_all)
 setkey(dcl_all, basin, first_prod_year)
 ## Find all the basin names for current state.
 basin_name <- unique(permian[, basin])
@@ -169,7 +170,7 @@ missing <- sqldf("with t0 as (
                  
                  select *
                  from permian
-                 where entity_id in (select entity_id from t0 where avg >= 20) and comment != 'All Zeros'
+                 where entity_id in (select entity_id from t0 where avg >=0.67) and comment != 'All Zeros'
                   and prod_date = last_prod_date ")
 
 
@@ -197,7 +198,7 @@ toChar <- function(date_real, j){
   return(char_res)
 }
 
-i = i+1
+
 ## Main program.
 tic_missing = proc.time()
 for (i in 1:nrow(missing)) {
@@ -354,7 +355,7 @@ for (i in 1:15) {
                    
                    select entity_id
                    from t1
-                   where avg >= 20")
+                   where avg >=0.67")
   
   forward = as.data.table(forward)
   # head(forward)
