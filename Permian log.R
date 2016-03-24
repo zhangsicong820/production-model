@@ -18,7 +18,48 @@ options("scipen"=100)
 #################################################################################################
 
 ### Loading drilling info data set here.
-permian <- dbGetQuery(base, "select * from dev.zsz_permian_dec")
+partition_load <-function(tbl_name, part_num){
+  ### tbl_name should be like: dev.zsz_permian_dec
+  ### load required library first.
+  library(pipeR) # if loaded before, this line can be commented.
+  library(data.table)
+  ###
+  
+  first_prod_year <- sprintf("select distinct(first_prod_year) from %s
+                             order by first_prod_year", tbl_name) %>>%
+                             {dbGetQuery(base, .)}
+  n = nrow(first_prod_year)
+  PARTNUM <- part_num
+  ind <- seq(from = 1, to = n,  by = (n - 1)/PARTNUM) # partition the table into 5 parts
+  thres <- first_prod_year[ind[2:PARTNUM],] # threshold for making partitions.
+  
+  # create an empty data table to hold all values.
+  result_table <- sprintf("select * from %s limit 0", tbl_name) %>>%
+  {dbGetQuery(base, .)} %>>%
+  {as.data.table(.)}
+  
+  for(i in 1:(PARTNUM)){
+    if(i == 1){
+      query <- sprintf("select * from %s
+                       where first_prod_year < %s", tbl_name, thres[i])
+    } else if(i == (PARTNUM)){
+      query <- sprintf("select * from %s
+                       where first_prod_year >= %s", tbl_name, thres[i - 1])
+    } else{
+      query <- sprintf("select * from %s where first_prod_year >= %s 
+                       and first_prod_year < %s", tbl_name,
+                       thres[i - 1], thres[i])
+    }
+    
+    ## using data.table and rbindlist for fast table binding.
+    partition <- dbGetQuery(base, query) %>>% as.data.table()
+    result_table <- rbindlist(list(result_table, partition))
+  }
+  return(result_table)
+}
+
+permian <- partition_load("dev.zsz_permian_dec", 10)
+#permian <- dbGetQuery(base, "select * from dev.zsz_permian_dec")
 permian <- mutate(permian, comment = "")
 permian$last_prod_date <- as.Date(permian$last_prod_date)
 permian$prod_date <- as.Date(permian$prod_date)
@@ -33,8 +74,8 @@ permian <- as.data.table(permian)
 setkey(permian, entity_id, basin, first_prod_year)
 
 ### Load decline rate data for all basins here.
-#dcl_all <- as.data.table(dbGetQuery(base, "select * from dev.zxw_log_dcl"))
-dcl_all <- as.data.table(dcl_all)
+dcl_all <- as.data.table(dbGetQuery(base, "select * from dev.zsz_permian_adj_log_dcl"))
+#dcl_all <- as.data.table(dcl_all)
 setkey(dcl_all, basin, first_prod_year)
 ## Find all the basin names for current state.
 basin_name <- unique(permian[, basin])
@@ -53,7 +94,7 @@ setkey(zero, entity_id)
 #basin_max_mth_tbl = as.data.table(basin_max_mth_table[basin_max_mth_table$basin == "PERMIAN BASIN",])
 
 ### Load basin maximum production month table.
-basin_max_mth_tbl <- dbGetQuery(base, "select * from dev.zxw_basin_max_mth")
+basin_max_mth_tbl <- dbGetQuery(base, "select * from dev.zsz_permian_basin_max")
 basin_max_mth_tbl <- as.data.table(basin_max_mth_tbl)
 
 setkey(basin_max_mth_tbl, basin, first_prod_year)
