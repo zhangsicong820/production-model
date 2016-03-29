@@ -10,9 +10,11 @@ library(pipeR)
 
 pgsql <- JDBC("org.postgresql.Driver", "C:/postgresql-9.2-1003.jdbc4.jar", "`")
 
-base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
+base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
 
-dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-107-22-245-176.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",user="u1e126kp11a30t",password="p99mbmnfeqdh729mn86vt1v085")
+dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-54-243-198-3.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                      user="u95mf00g8knim4",password="p4jm2l990uj4hl92dh9abf6qmkr")
 
 options("scipen"=100)
 #################################################################################################
@@ -509,7 +511,7 @@ f_price <- dbGetQuery(base, "select (substr(contract,4,2)::INT + 2000) as year,
                       when substr(contract,3,1) = 'X' then 11
                       when substr(contract,3,1) = 'Z' then 12 end as month, *	     	  
                       from nymex_nearby 
-                      where tradedate = (select max(tradedate) from nymex_nearby where product_symbol = 'CL') and product_symbol = 'CL'")
+                      where contract = (select contract from nymex_nearby where tradedate = (select max(tradedate) from nymex_nearby where product_symbol = 'CL') and product_symbol = 'CL')")
 
 future_price <- as.data.frame(matrix(nrow = 11, ncol = 3));
 colnames(future_price)<-c('year', 'month', 'avg');
@@ -518,14 +520,14 @@ colnames(future_price)<-c('year', 'month', 'avg');
 ##transform future price table
 for (i in 1:11){
   
-  if(f_price$month + i <= 12){
-    future_price$year[i] <- f_price$year
-    future_price$month[i] <- f_price$month + i
-    future_price$avg[i] <- f_price[, (6+i)]
+  if(unique(f_price$month) + i <= 12){
+    future_price$year[i] <- unique(f_price$year)
+    future_price$month[i] <- unique(f_price$month) + i
+    future_price$avg[i] <- mean(f_price[, (6+i)])
   } else {
-    future_price$year[i] <- f_price$year + 1
-    future_price$month [i]<- f_price$month + i - 12
-    future_price$avg[i] <- f_price[, (6+i)]
+    future_price$year[i] <- unique(f_price$year)
+    future_price$month[i] <- unique(f_price$month) + i - 12
+    future_price$avg[i] <- mean(f_price[, (6+i)])
   }
 }
 
@@ -578,11 +580,11 @@ hist_prod$prod_date <- as.Date(hist_prod$prod_date)
 
 ## forward prod from hist wells
 
-prod <-  plyr::ddply(permian, 'prod_date', summarise, sum = sum(liq)/1000)
+prod <-  plyr::ddply(permian, 'prod_date', summarise, prod = sum(liq)/1000)
 
-prod <- mutate(prod, prod = sum/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days")))
+#prod <- mutate(prod, prod = sum/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days")))
 
-updated_prod <- prod[prod$prod_date > max(hist_prod$prod_date),-2]
+updated_prod <- prod[prod$prod_date > max(hist_prod$prod_date),]
 
 first_prod <- dbGetQuery(base, "select prod_date, round(sum(liq)/1000/(extract(days from (prod_date + interval '1 month' - prod_date))),0) as prod
                          from di.pden_desc a join di.pden_prod b on a.entity_id = b.entity_id
@@ -622,7 +624,7 @@ setkey(dcl_state_avg, first_prod_year, n_mth)
 
 ## prod from new wells and 15 month forward
 
-
+i = i + 1
 for (i in 1:20) {
   if(as.Date(format(as.Date(max(hist_prod$prod_date))+32,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
   {
@@ -660,7 +662,7 @@ for (i in 1:20) {
     
     if(new_first_prod[i,1] <= cutoff_date) {
       temp <- new_first_prod[i,]
-    } else {
+    } else { 
       for (j in 1:20) {
         if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
         {
