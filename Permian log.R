@@ -660,7 +660,7 @@ for (i in 1:20) {
     # update the updated production
     temp <- new_first_prod[i,]
     
-    if(new_first_prod[i,1] < cutoff_date) {
+    if(new_first_prod[i,1] <= cutoff_date) {
       temp <- new_first_prod[i,]
     } else {# j = j + 1
       for (j in 1:20) {

@@ -17,8 +17,48 @@ dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-107-22-245-176.compute-1.ama
 options("scipen"=100)
 #################################################################################################
 
-### Loading drilling info data set here.
-gom <- dbGetQuery(base, "select * from dev.zsz_gom_dec")
+partition_load <-function(tbl_name, part_num){
+  ### tbl_name should be like: dev.zsz_gom_dec
+  ### load required library first.
+  library(pipeR) # if loaded before, this line can be commented.
+  library(data.table)
+  ###
+  
+  first_prod_year <- sprintf("select distinct(first_prod_year) from %s
+                             order by first_prod_year", tbl_name) %>>%
+                             {dbGetQuery(base, .)}
+  n = nrow(first_prod_year)
+  PARTNUM <- part_num
+  ind <- seq(from = 1, to = n,  by = (n - 1)/PARTNUM) # partition the table into 5 parts
+  thres <- first_prod_year[ind[2:PARTNUM],] # threshold for making partitions.
+  
+  # create an empty data table to hold all values.
+  result_table <- sprintf("select * from %s limit 0", tbl_name) %>>%
+  {dbGetQuery(base, .)} %>>%
+  {as.data.table(.)}
+  
+  for(i in 1:(PARTNUM)){
+    if(i == 1){
+      query <- sprintf("select * from %s
+                       where first_prod_year < %s", tbl_name, thres[i])
+    } else if(i == (PARTNUM)){
+      query <- sprintf("select * from %s
+                       where first_prod_year >= %s", tbl_name, thres[i - 1])
+    } else{
+      query <- sprintf("select * from %s where first_prod_year >= %s 
+                       and first_prod_year < %s", tbl_name,
+                       thres[i - 1], thres[i])
+    }
+    
+    ## using data.table and rbindlist for fast table binding.
+    partition <- dbGetQuery(base, query) %>>% as.data.table()
+    result_table <- rbindlist(list(result_table, partition))
+  }
+  return(result_table)
+  }
+
+gom <- partition_load("dev.zsz_gom_dec", 10)
+#gom <- dbGetQuery(base, "select * from dev.zsz_gom_dec")
 gom <- mutate(gom, comment = "")
 gom$last_prod_date <- as.Date(gom$last_prod_date)
 gom$prod_date <- as.Date(gom$prod_date)
@@ -33,6 +73,7 @@ gom <- as.data.table(gom)
 setkey(gom, entity_id, basin, first_prod_year)
 
 ### Load decline rate data for all basins here.
+#dcl_all <- as.data.table(dbGetQuery(base, "select * from dev.zsz_gom_adj_log_dcl"))
 dcl_all <- as.data.table(dcl_all)
 setkey(dcl_all, basin, first_prod_year)
 ## Find all the basin names for current state.
@@ -49,11 +90,11 @@ zero <- as.data.table(zero)
 setkey(zero, entity_id)
 
 ### Load basin maximum production month table.
-#basin_max_mth_tbl = as.data.table(basin_max_mth_table[basin_max_mth_table$basin == "gom BASIN",])
+basin_max_mth_tbl = as.data.table(basin_max_mth_table[basin_max_mth_table$basin %in% c('GOM - DEEPWATER', 'GOM - SHELF'),])
 
 ### Load basin maximum production month table.
-
-basin_max_mth_tbl <- as.data.table(basin_max_mth_table)
+#basin_max_mth_tbl <- dbGetQuery(base, "select * from dev.zsz_gom_basin_max")
+#basin_max_mth_tbl <- as.data.table(basin_max_mth_tbl)
 
 setkey(basin_max_mth_tbl, basin, first_prod_year)
 
@@ -140,14 +181,12 @@ for (i in 1:nrow(zero)) {
   }
 }
 
-#test <- subset(gom, comment == "Updated")
-
-
 toc_zero = proc.time() # Record ending time.
 time_usage_zero = toc_zero - tic_zero
 time_usage_zero
 gom_zero = gom # replicate the filled table as a backup
 # gom = gom_zero  # rolling back point
+
 
 #-----------------------------------------#
 # Part Two -- Filling the missing values. #
@@ -171,8 +210,12 @@ missing <- sqldf("with t0 as (
                  
                  select *
                  from gom
-                 where entity_id in (select entity_id from t0 where avg >= 20) and 
-                  prod_date = last_prod_date and last_prod_date != cutoff_date")
+                 where entity_id in (select entity_id from t0 where avg >= 0.67) and comment != 'All Zeros'
+                 and prod_date = last_prod_date ")
+
+
+
+
 
 missing <- subset(missing, last_prod_date < cutoff_date)
 missing <- as.data.table(missing)
@@ -285,6 +328,9 @@ for (i in 1:nrow(missing)) {
   }
 }
 
+gom[(entity_id == temp_entity_id),]
+
+
 toc_missing = proc.time()
 time_usage_missing = toc_missing - tic_missing
 time_usage_missing
@@ -349,7 +395,7 @@ for (i in 1:15) {
                    
                    select entity_id
                    from t1
-                   where avg >= 20")
+                   where avg >=0.67")
   
   forward = as.data.table(forward)
   # head(forward)
@@ -462,7 +508,7 @@ f_price <- dbGetQuery(base, "select (substr(contract,4,2)::INT + 2000) as year,
                       when substr(contract,3,1) = 'X' then 11
                       when substr(contract,3,1) = 'Z' then 12 end as month, *	     	  
                       from nymex_nearby 
-                      where tradedate = (select max(tradedate) from nymex_nearby where product_symbol = 'CL') and product_symbol = 'CL'")
+                      where contract = (select contract from nymex_nearby where tradedate = (select max(tradedate) from nymex_nearby where product_symbol = 'CL') and product_symbol = 'CL')")
 
 future_price <- as.data.frame(matrix(nrow = 11, ncol = 3));
 colnames(future_price)<-c('year', 'month', 'avg');
@@ -471,14 +517,14 @@ colnames(future_price)<-c('year', 'month', 'avg');
 ##transform future price table
 for (i in 1:11){
   
-  if(f_price$month + i <= 12){
-    future_price$year[i] <- f_price$year
-    future_price$month[i] <- f_price$month + i
-    future_price$avg[i] <- f_price[, (6+i)]
+  if(unique(f_price$month) + i <= 12){
+    future_price$year[i] <- unique(f_price$year)
+    future_price$month[i] <- unique(f_price$month) + i
+    future_price$avg[i] <- mean(f_price[, (6+i)])
   } else {
-    future_price$year[i] <- f_price$year + 1
-    future_price$month [i]<- f_price$month + i - 12
-    future_price$avg[i] <- f_price[, (6+i)]
+    future_price$year[i] <- unique(f_price$year)
+    future_price$month[i] <- unique(f_price$month) + i - 12
+    future_price$avg[i] <- mean(f_price[, (6+i)])
   }
 }
 
@@ -511,7 +557,7 @@ new_prod <- dbGetQuery(base, "select first_prod_date, extract('year' from first_
                        extract('month' from first_prod_date) first_prod_month, 
                        round(sum(liq)/1000/(extract(days from (first_prod_date + interval '1 month' - first_prod_date))),0) as new_prod
                        from di.pden_desc a join di.pden_prod b on a.entity_id = b.entity_id
-                       where liq_cum >0 and prod_date >= '2013-12-01' and ALLOC_PLUS IN ('Y','X') and liq >= 0 and basin in ('GOM - DEEPWATER', 'GOM - SHELF')
+                       where liq_cum >0 and prod_date >= '2013-12-01' and ALLOC_PLUS IN ('Y','X') and liq >= 0 and basin in ('GOM - DEEPWATER', 'GOM - SHELF') 
                        and first_prod_date < date_trunc('month', current_date)::DATE - interval '5 month' and first_prod_date = prod_date
                        group by 1,2,3
                        order by 1,2,3")
@@ -531,11 +577,11 @@ hist_prod$prod_date <- as.Date(hist_prod$prod_date)
 
 ## forward prod from hist wells
 
-prod <-  plyr::ddply(gom, 'prod_date', summarise, sum = sum(liq)/1000)
+prod <-  plyr::ddply(gom, 'prod_date', summarise, prod = sum(liq)/1000)
 
-prod <- mutate(prod, prod = sum/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days")))
+#prod <- mutate(prod, prod = sum/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days")))
 
-updated_prod <- prod[prod$prod_date > max(hist_prod$prod_date),-2]
+updated_prod <- prod[prod$prod_date > max(hist_prod$prod_date),]
 
 first_prod <- dbGetQuery(base, "select prod_date, round(sum(liq)/1000/(extract(days from (prod_date + interval '1 month' - prod_date))),0) as prod
                          from di.pden_desc a join di.pden_prod b on a.entity_id = b.entity_id
@@ -574,7 +620,7 @@ dcl_state_avg <- as.data.table(dcl_state_avg)
 setkey(dcl_state_avg, first_prod_year, n_mth)
 
 ## prod from new wells and 15 month forward
-
+#test <- updated_prod
 
 for (i in 1:20) {
   if(as.Date(format(as.Date(max(hist_prod$prod_date))+32,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
@@ -613,13 +659,13 @@ for (i in 1:20) {
     
     if(new_first_prod[i,1] <= cutoff_date) {
       temp <- new_first_prod[i,]
-    } else {
+    } else {# j = j + 1
       for (j in 1:20) {
-        if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
+        if(as.Date(format(as.Date(min(temp$prod_date))+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
         {
           break
         }
-        if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01'))<= as.Date(max(prod$prod_date)))
+        if(as.Date(format(as.Date(min(temp$prod_date))+32*j,'%Y-%m-01'))<= as.Date(max(prod$prod_date)))
         {
           m = nrow(temp)
           temp[m+1, 1] <- as.character(format(as.Date(temp$prod_date[j])+32,'%Y-%m-01'))
@@ -637,6 +683,10 @@ for (i in 1:20) {
     
     
     #temp$prod_date <- as.Date(temp$prod_date)
+    #sql_query <- sprintf("select a.*, coalesce(b.prod, 0) as prod%s
+    #              from test a left join temp b on a.prod_date = b.prod_date", i)
+    
+    #test <- sqldf(sql_query)
     
     updated_prod <- sqldf("select a.prod_date, a.prod + coalesce(b.prod, 0) as prod
                           from updated_prod a left join temp b on a.prod_date = b.prod_date")
@@ -653,9 +703,6 @@ for (i in 1:20) {
                               }, 0)
   }
 }
-
-
-
 
 
 
