@@ -8,9 +8,12 @@ library(forecast)
 
 pgsql <- JDBC("org.postgresql.Driver", "C:/postgresql-9.2-1003.jdbc4.jar", "`")
 
-base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
 
-dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-107-22-245-176.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",user="u1e126kp11a30t",password="p99mbmnfeqdh729mn86vt1v085")
+base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
+
+dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-54-243-198-3.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                      user="u95mf00g8knim4",password="p4jm2l990uj4hl92dh9abf6qmkr")
 
 options("scipen"=100)
 options(stringsAsFactors = F)
@@ -20,9 +23,8 @@ options(stringsAsFactors = F)
 print(Sys.time())
 
 ## decline rate for all basins
-dcl_all <- dbGetQuery(base, "select * from dev.zsz_offshore_dcl_log")
+dcl_all <- dbGetQuery(dev_base, "select * from zsz.crd_prod_dcl_log where basin = 'PERMIAN BASIN'")
 
-#dcl_all  <- dbGetQuery(base, "select * from dev.zsz_crd_dcl")
 
 ## distinct first production year
 first_prod_year <- sqldf("select distinct basin, first_prod_year from dcl_all order by 1")
