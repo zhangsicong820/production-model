@@ -23,7 +23,7 @@ options(stringsAsFactors = F)
 print(Sys.time())
 
 ## decline rate for all basins
-dcl_all <- dbGetQuery(dev_base, "select * from zsz.crd_prod_dcl_log where basin = 'PERMIAN BASIN'")
+dcl_all <- dbGetQuery(dev_base, "select * from zsz.crd_prod_dcl_log")
 
 
 ## distinct first production year
