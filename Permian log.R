@@ -437,8 +437,12 @@ dcl_state_avg <- as.data.table(dcl_state_avg)
 setkey(dcl_state_avg, first_prod_year, n_mth)
 
 ## prod from new wells and 15 month forward
+<<<<<<< HEAD
 test <- updated_prod
+=======
+>>>>>>> parent of aa9ffb2... fix new prod problem
 
+i = i + 1
 for (i in 1:20) {
   if(as.Date(format(as.Date(max(hist_prod$prod_date))+32,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
   {
@@ -476,13 +480,13 @@ for (i in 1:20) {
     
     if(new_first_prod[i,1] <= cutoff_date) {
       temp <- new_first_prod[i,]
-    } else {# j = j + 1
+    } else { 
       for (j in 1:20) {
-        if(as.Date(format(as.Date(min(temp$prod_date))+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
+        if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
         {
           break
         }
-        if(as.Date(format(as.Date(min(temp$prod_date))+32*j,'%Y-%m-01'))<= as.Date(max(prod$prod_date)))
+        if(as.Date(format(as.Date(temp$prod_date)+32*j,'%Y-%m-01'))<= as.Date(max(prod$prod_date)))
         {
           m = nrow(temp)
           temp[m+1, 1] <- as.character(format(as.Date(temp$prod_date[j])+32,'%Y-%m-01'))
@@ -500,10 +504,13 @@ for (i in 1:20) {
     
     
     #temp$prod_date <- as.Date(temp$prod_date)
+<<<<<<< HEAD
     sql_query <- sprintf("select a.*, coalesce(b.prod, 0) as prod%s
                   from test a left join temp b on a.prod_date = b.prod_date", i)
     
     test <- sqldf(sql_query)
+=======
+>>>>>>> parent of aa9ffb2... fix new prod problem
     
     updated_prod <- sqldf("select a.prod_date, a.prod + coalesce(b.prod, 0) as prod
                           from updated_prod a left join temp b on a.prod_date = b.prod_date")
