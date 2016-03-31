@@ -2,7 +2,6 @@ library(rJava)
 library(RJDBC)
 library(sqldf)
 library(plyr)
-library(kimisc)
 library(doParallel)
 library(data.table)
 library(foreach)
@@ -10,76 +9,56 @@ library(pipeR)
 
 pgsql <- JDBC("org.postgresql.Driver", "C:/postgresql-9.2-1003.jdbc4.jar", "`")
 
-base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
+base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
 
-dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-107-22-245-176.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",user="u1e126kp11a30t",password="p99mbmnfeqdh729mn86vt1v085")
+dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-54-243-198-3.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                      user="u95mf00g8knim4",password="p4jm2l990uj4hl92dh9abf6qmkr")
+
+source("C:/Users/clipper/Desktop/clipper/R/SourceCodeBackUp/function_source.R")
 
 options("scipen"=100)
 #################################################################################################
 
-partition_load <-function(tbl_name, part_num){
-  ### tbl_name should be like: dev.zsz_gom_dec
-  ### load required library first.
-  library(pipeR) # if loaded before, this line can be commented.
-  library(data.table)
-  ###
-  
-  first_prod_year <- sprintf("select distinct(first_prod_year) from %s
-                             order by first_prod_year", tbl_name) %>>%
-                             {dbGetQuery(base, .)}
-  n = nrow(first_prod_year)
-  PARTNUM <- part_num
-  ind <- seq(from = 1, to = n,  by = (n - 1)/PARTNUM) # partition the table into 5 parts
-  thres <- first_prod_year[ind[2:PARTNUM],] # threshold for making partitions.
-  
-  # create an empty data table to hold all values.
-  result_table <- sprintf("select * from %s limit 0", tbl_name) %>>%
-  {dbGetQuery(base, .)} %>>%
-  {as.data.table(.)}
-  
-  for(i in 1:(PARTNUM)){
-    if(i == 1){
-      query <- sprintf("select * from %s
-                       where first_prod_year < %s", tbl_name, thres[i])
-    } else if(i == (PARTNUM)){
-      query <- sprintf("select * from %s
-                       where first_prod_year >= %s", tbl_name, thres[i - 1])
-    } else{
-      query <- sprintf("select * from %s where first_prod_year >= %s 
-                       and first_prod_year < %s", tbl_name,
-                       thres[i - 1], thres[i])
-    }
-    
-    ## using data.table and rbindlist for fast table binding.
-    partition <- dbGetQuery(base, query) %>>% as.data.table()
-    result_table <- rbindlist(list(result_table, partition))
-  }
-  return(result_table)
-  }
-
-gom <- partition_load("dev.zsz_gom_dec", 10)
-#gom <- dbGetQuery(base, "select * from dev.zsz_gom_dec")
-gom <- mutate(gom, comment = "")
-gom$last_prod_date <- as.Date(gom$last_prod_date)
-gom$prod_date <- as.Date(gom$prod_date)
-
-## choose the max date of available data
-cutoff_date <- as.Date(dbGetQuery(base, "select max(prod_date) as max from dev.zsz_gom_dec")$max)
-
+#------------#
+cat('Production data was loaded successfully...\n')
+#------------#
 
 ## Change data struture into data.table
+
+deepwater <- partition_load("GOM - DEEPWATER", 10)
+shelf <- partition_load("GOM - SHELF", 10)
+
+gom <- as.data.frame(rbind(deepwater, shelf))
 gom <- as.data.table(gom)
 ## Set keys for faster searching.
 setkey(gom, entity_id, basin, first_prod_year)
 
-### Load decline rate data for all basins here.
-#dcl_all <- as.data.table(dbGetQuery(base, "select * from dev.zsz_gom_adj_log_dcl"))
+gom[, comment := ""]
+gom[, last_prod_date := as.Date(last_prod_date)]
+gom[, prod_date:= as.Date(prod_date)]
+
+## choose the max date of available data
+cutoff_date <- as.Date(max(gom[,prod_date]))
+
+## change the liq into daily level.
+## This could be done directly in the database.
+# gom[, liq := liq/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = 'days')]
+
+
+## Load decline rate data for all basins here.
+#dcl_all <- dbGetQuery(base, "select * from dev.zsz_gom_adj_log_dcl")
+# dcl_all <- fread('C:/Users/Xiao Wang/Desktop/Programs/Projects/Prod_CO_WY/dcl_all_simple.csv')
 dcl_all <- as.data.table(dcl_all)
 setkey(dcl_all, basin, first_prod_year)
 ## Find all the basin names for current state.
 basin_name <- unique(gom[, basin])
 ## Subset the decline rate table for faster matching.
 dcl <- dcl_all[basin %in% basin_name, ]
+
+#------------#
+cat('Decline rate data was loaded successfully...\n')
+#------------#
 
 ### Find entity with zero production.
 zero <- sqldf("select entity_id
@@ -90,117 +69,59 @@ zero <- as.data.table(zero)
 setkey(zero, entity_id)
 
 ### Load basin maximum production month table.
-basin_max_mth_tbl = as.data.table(basin_max_mth_table[basin_max_mth_table$basin %in% c('GOM - DEEPWATER', 'GOM - SHELF'),])
-
-### Load basin maximum production month table.
-#basin_max_mth_tbl <- dbGetQuery(base, "select * from dev.zsz_gom_basin_max")
-#basin_max_mth_tbl <- as.data.table(basin_max_mth_tbl)
-
+#basin_max_mth_tbl <- dbGetQuery(base, "select * from dev.zxw_basin_max_mth")
+basin_max_mth_tbl <- as.data.table(basin_max_mth_table)
 setkey(basin_max_mth_tbl, basin, first_prod_year)
-
 
 #-----------------------------------------------------------------#
 # Part 1 -- Filling entity production which is actually not zero. #
 #-----------------------------------------------------------------#
-
-## Define a function to match the decline rate.
-## 'dcl' table must be loaded.
-find_dcl_factor = function(basin_, first_, month_){
-  # Find the log decline rate first.
-  dcl_rate = dcl[(first_prod_year == first_ & basin == basin_) & n_mth == month_, avg]/100
-  # the decline rate is calculated as r(t) = log(1 + P(t)) - log(1 + P(t - 1))
-  # the decline rate factor is calculated as 10^dcl)
-  # The next period production is: P(t) = (1 + P(t - 1))*10^(dcl) -1
-  dcl_factor = 10^(dcl_rate)
-  return(dcl_factor)
-}
+## In this part, two functions need to be loaded from function_source:
+## @7th: filling_zero(), and @8th update_table()
 
 ### Main part.
-tic_zero = proc.time() # Record the start time...
-for (i in 1:nrow(zero)) {
-  #choose prod data for past 6 month
-  temp <- gom[entity_id == zero[i,entity_id],]
-  temp_entity_id <- temp[1,entity_id]
-  temp_basin <- temp[1,basin]
-  
-  if (temp[1,first_prod_year] < 1980) {
-    first <- 1980 } else {
-      first <- temp[1,first_prod_year]
-    }
-  
-  ## max month of production in basin where the entity is and from the year that entity first start producing
-  basin_max_mth <- basin_max_mth_tbl[basin == temp_basin & first_prod_year == first, max]
-  
-  ## Actual max month of production of the entity
-  max_n_mth <- temp[prod_date == last_prod_date[1], n_mth]
-  
-  ## find the max month of dcl
-  if (max_n_mth >= basin_max_mth) {
-    dcl_mth <- basin_max_mth
-  } else {
-    dcl_mth <- max_n_mth
-  }
-  
-  if (temp[n_mth == (max_n_mth - 1),liq] == 0) {
-    
-    if (temp[n_mth == (max_n_mth - 2),liq] == 0) {
-      
-      if (temp[n_mth == (max_n_mth - 3),liq] == 0) {
-        
-        gom[entity_id == temp_entity_id, comment:= "All Zeros"]
-      } else {
-        
-        temp_liq_lag_2 = (1 + temp[n_mth == (max_n_mth - 3), liq]) * find_dcl_factor(temp_basin, first, dcl_mth - 2) - 1
-        gom[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), liq:= temp_liq_lag_2]
-        gom[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), comment:= "Updated"]
-        
-        temp_liq_lag_1 = (1 + gom[(n_mth == (max_n_mth - 2) & entity_id == temp_entity_id), liq]) * find_dcl_factor(temp_basin, first, dcl_mth - 1) - 1
-        gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq:= temp_liq_lag_1]
-        gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id),comment:="Updated"]
-        
-        temp_liq_lag_0 = (1 + gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq])  * find_dcl_factor(temp_basin, first, dcl_mth) - 1
-        gom[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
-        gom[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
-      }
-    } else {
-      
-      temp_liq_lag_1 = (1 + temp[n_mth == (max_n_mth - 2), liq]) * find_dcl_factor(temp_basin, first, dcl_mth - 1) - 1
-      gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq:= temp_liq_lag_1]
-      gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), comment:="Updated"]
-      
-      temp_liq_lag_0 = (1 + gom[(n_mth == (max_n_mth - 1) & entity_id == temp_entity_id), liq]) * find_dcl_factor(temp_basin, first, dcl_mth) - 1
-      gom[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
-      gom[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
-    }
-    
-  } else {
-    
-    temp_liq_lag_0 = (1 + temp[(n_mth == (max_n_mth - 1)), liq]) * find_dcl_factor(temp_basin, first, dcl_mth) - 1
-    gom[(n_mth == max_n_mth & entity_id == temp_entity_id), liq:= temp_liq_lag_0]
-    gom[(n_mth == max_n_mth & entity_id == temp_entity_id), comment:="Updated"]
-  }
-}
+numberOfWorkers = 3
+cl_zero <- makeCluster(numberOfWorkers)
+registerDoParallel(cl_zero)
 
+#------------#
+cat(sprintf('The number of threads is %i...\n', numberOfWorkers))
+cat('#-------------------------------------------#\n')
+cat(sprintf('Start filling zero at %s...\n', as.character(Sys.time())))
+#------------#
+
+tic_zero = proc.time() # Record the start time...
+# collect all the updated entries.
+fill_zero = foreach(i = 1:nrow(zero), .combine = rbind, .packages =  'data.table') %dopar%
+  filling_zero(i, prod_tbl = gom)
+
+# update the orignal table with values calculated in the last step.
+gom <- update_table(orig_tbl = gom, update_val_tbl = fill_zero)
 toc_zero = proc.time() # Record ending time.
 time_usage_zero = toc_zero - tic_zero
 time_usage_zero
-gom_zero = gom # replicate the filled table as a backup
-# gom = gom_zero  # rolling back point
+
+stopCluster(cl_zero)
+# replicate the filled table as a backup
+gom_zero = gom
+setkey(gom, entity_id, basin, first_prod_year)
+
+#------------#
+cat(sprintf('Filling zero was executed successfully at %s...\n', as.character(Sys.time())))
+cat('#-------------------------------------------#\n')
+#------------#
 
 
 #-----------------------------------------#
 # Part Two -- Filling the missing values. #
 #-----------------------------------------#
+cl_miss <- makeCluster(numberOfWorkers)
+registerDoParallel(cl_miss)
 
-## Check the average production for the last 6 month to determine the threshold.
-# check_avg = dbGetQuery(base, " select entity_id, round(avg(liq),0) as avg
-#                        from dev.zxw_co_dec
-#                        where prod_date >= (last_prod_date - interval '6 month')
-#                        group by entity_id")
-# check_avg = as.data.table(check_avg)
-#
-# hist(check_avg[avg <= 150, avg])
-##
+#------------#
+cat(sprintf('Start filling missing values at %s...\n',as.character(Sys.time())))
+#------------#
+
 
 ## Entity with missing data
 missing <- sqldf("with t0 as (
@@ -210,12 +131,8 @@ missing <- sqldf("with t0 as (
                  
                  select *
                  from gom
-                 where entity_id in (select entity_id from t0 where avg >= 0.67) and comment != 'All Zeros'
-                 and prod_date = last_prod_date ")
-
-
-
-
+                 where entity_id in (select entity_id from t0 where avg >= round(20/30,4)) 
+                 and prod_date = last_prod_date")
 
 missing <- subset(missing, last_prod_date < cutoff_date)
 missing <- as.data.table(missing)
@@ -227,158 +144,48 @@ missing[, prod_date := as.character(prod_date)]
 gom[, last_prod_date := as.character(last_prod_date)]
 gom[, prod_date := as.character(prod_date)]
 
-## Define a function for data type change.
-toDate <- function(date_char, j){
-  date_res <- as.Date(format(as.Date(date_char) + 32*j, '%Y-%m-01'))
-  return(date_res)
-}
-
-toChar <- function(date_real, j){
-  char_res <- as.character(format(as.Date(date_real)+32*j,'%Y-%m-01'))
-  return(char_res)
-}
-
-
 ## Main program.
 tic_missing = proc.time()
-for (i in 1:nrow(missing)) {
-  temp <- missing[i,]
-  temp_entity_id <- temp[, entity_id]
-  temp_basin <- temp[, basin]
-  
-  if (temp[1, first_prod_year] < 1980) {
-    first <- 1980 } else {
-      first <- temp[1, first_prod_year]
-    }
-  
-  ## max month of production in basin where the entity is  and from the year that entity first start producing
-  basin_max_mth <- basin_max_mth_tbl[basin == temp_basin & first_prod_year == first, max]
-  
-  ## Actual max month of production of the entity
-  max_n_mth <- temp[prod_date == last_prod_date[1], n_mth]
-  
-  ## find the max month of dcl
-  if (max_n_mth >= basin_max_mth) {
-    dcl_mth <- basin_max_mth
-    
-    # j = 0
-    for(j in 1:5)
-    {
-      if(toDate(temp[, prod_date], j) > cutoff_date)
-      {
-        break
-      }
-      if(toDate(temp[, prod_date], j) <= cutoff_date)
-      {
-        n = nrow(gom)
-        gom[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[, last_prod_date], j)]
-        
-        if(j == 1) {
-          temp_liq = round((1 + temp[, liq]) *find_dcl_factor(temp[, basin], first, dcl_mth) - 1, 0)
-        } else {
-          temp_liq = round((1 + gom[n,liq]) * find_dcl_factor(temp[, basin], first, dcl_mth) - 1, 0)
-        }
-        
-        # Create a temporary data table to store the generated row.
-        temp_dt = data.table(
-          "entity_id" = temp_entity_id,
-          "basin" = temp_basin,
-          "first_prod_year" = temp[,first_prod_year],
-          "last_prod_date" = toChar(temp[,last_prod_date], j),
-          "n_mth" = (temp[,n_mth] + j),
-          "prod_date" = toChar(temp[, prod_date], j),
-          "liq" = temp_liq,
-          "comment" = "Inserted")
-        gom = rbindlist(list(gom, temp_dt))
-      }
-    }
-    
-  } else {
-    dcl_mth <- max_n_mth
-    
-    # j = 1
-    for(j in 1:5)
-    {
-      if(toDate(temp[, prod_date], j) > cutoff_date)
-      {
-        break
-      }
-      if(toDate(temp[, prod_date], j) <= cutoff_date)
-      {
-        n = nrow(gom)
-        gom[(entity_id == temp_entity_id), last_prod_date:= toChar(temp[,last_prod_date], j)]
-        if(j == 1) {
-          temp_liq = round((1 + temp[,liq]) * find_dcl_factor(temp_basin, first, dcl_mth + j) - 1, 0)
-        } else {
-          temp_liq = round((1 + gom[n, liq]) * find_dcl_factor(temp_basin, first, dcl_mth + j) - 1, 0)
-        }
-        
-        temp_dt = data.table(
-          "entity_id" = temp_entity_id,
-          "basin" = temp_basin,
-          "first_prod_year" = temp[,first_prod_year],
-          "last_prod_date" = toChar(temp[,last_prod_date], j),
-          "n_mth" = (temp[,n_mth] + j),
-          "prod_date" = toChar(temp[,prod_date], j),
-          "liq" = temp_liq,
-          "comment" = "Inserted")
-        gom = rbindlist(list(gom, temp_dt))
-      }
-    }
-  }
-}
+fill_miss = foreach(i = 1:nrow(missing), .combine = rbind, .packages = 'data.table') %dopar%
+  filling_missing(i)
 
-gom[(entity_id == temp_entity_id),]
-
+setkey(fill_miss, entity_id, n_mth)
+# Update last_prod_date for entities who are filled.
+last_prod_date_tbl <- fill_miss[!duplicated(entity_id, fromLast = T), .(entity_id, last_prod_date)]
+updated_date = last_prod_date_tbl[1, last_prod_date]
+# Add fill_miss table into original production table.
+gom <- rbindlist(list(gom, fill_miss))
+# Due to the cutoff date is set, so the last_prod_dates for filled data are the same.
+gom[entity_id %in% last_prod_date_tbl[,entity_id], last_prod_date := updated_date]
 
 toc_missing = proc.time()
 time_usage_missing = toc_missing - tic_missing
 time_usage_missing
+
 gom_missing = gom
+stopCluster(cl_miss)
+
+setkey(gom, entity_id, basin, first_prod_year)
+#------------#
+cat(sprintf('Filling missing values was executed successfully at %s...\n', as.character(Sys.time())))
+cat('#-------------------------------------------#\n')
+#------------#
+
 
 #---------------------------------------------#
 # Part Three -- 15 month forward projection   #
 #---------------------------------------------#
 
-## Define a function to make forward projection
-## This function could be executed parallelly.
-
-forward_liq_func <- function(j){
-  temp <- forward_dt[j, ]
-  temp_entity_id <- temp[,entity_id]
-  temp_basin <- temp[, basin]
-  
-  if (temp[, first_prod_year] < 1980) {
-    first <- 1980 }
-  else {
-    first <- temp[, first_prod_year]
-  }
-  
-  ## max month of production in basin where the entity is  and from the year that entity first start producing
-  basin_max_mth <- basin_max_mth_tbl[basin == temp_basin & first_prod_year == first, max]
-  
-  ## Actual max month of production of the entity
-  max_n_mth <- temp[prod_date == last_prod_date[1], n_mth]
-  
-  if (max_n_mth >= basin_max_mth) {
-    dcl_mth <- basin_max_mth + 1 
-  } else {
-    dcl_mth <- max_n_mth + 1
-  }
-  
-  # dcl_mth <- (max_n_mth + 1)
-  temp_dt = data.table("liq"= round((1 + temp[,liq]) * find_dcl_factor(temp_basin, first, dcl_mth) - 1, 0))
-  return(temp_dt$liq)
-}
-
 ## Parallel computing setting.
-numOfWorkers <- 3 # the number of threads
-cl <- makeCluster(numOfWorkers) # create the clusters.
-registerDoParallel(cl) # register the cluster setting to use multicores.
-# stopCluster(cl) # After making forward projection, cluster must be stopped.
+cl_forward <- makeCluster(numberOfWorkers) # create the clusters.
+registerDoParallel(cl_forward) # register the cluster setting to use multicores.
+
+
+#------------#
+cat(sprintf('Start making forward projection at %s...\n',as.character(Sys.time())))
+#------------#
 
 ## Main Routine.
-
 tic_forward = proc.time()
 for (i in 1:15) {
   forward <- sqldf("with t0 as (
@@ -395,16 +202,30 @@ for (i in 1:15) {
                    
                    select entity_id
                    from t1
-                   where avg >=0.67")
+                   where avg >= round(20/30,4)")
   
   forward = as.data.table(forward)
-  # head(forward)
-  
   gom_last = gom[last_prod_date == prod_date, ]
   forward_dt = gom_last[entity_id %in% forward[, entity_id], ]
   
   # entities whose liq would remain constant.
-  const_forward_dt = gom_last[!(entity_id %in% forward[, entity_id]), ]
+  forward_const <- sqldf("with t0 as (
+                         select entity_id, max(n_mth) as max
+                         from gom
+                         where comment != 'All Zeros'
+                         group by entity_id),
+                         
+                         t1 as (
+                         select a.entity_id, avg(liq) as avg
+                         from gom a join t0 b on a.entity_id = b. entity_id
+                         where n_mth >= max - 6 and comment != 'All Zeros'
+                         group by a.entity_id)
+                         
+                         select entity_id
+                         from t1
+                         where avg < round(20/30,4) and avg > 0")
+  forward_const <- as.data.table(forward_const)
+  const_forward_dt = gom_last[entity_id %in% forward_const[, entity_id], ]
   
   # Making forward projection parallelly.
   # Cluster need to be set before.
@@ -433,26 +254,25 @@ for (i in 1:15) {
   temp_gom_const[, liq:= const_liq]
   
   # Update the last_prod_date for all the entities.
-  #gom[entity_id %in% forward_dt[,entity_id], last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
-  gom[, last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
-  
+  gom[entity_id %in% forward_dt[,entity_id], last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+  gom[entity_id %in% const_forward_dt[,entity_id], last_prod_date:=as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
   
   # Append the forward prediction in original data set.
-  gom = rbindlist(list(gom, temp_gom_forward))
-  gom = rbindlist(list(gom, temp_gom_const))
+  gom = rbindlist(list(gom, temp_gom_forward,temp_gom_const))
   setkey(gom, entity_id, basin, first_prod_year)
   cat(sprintf('Congratulations! Iteration %i runs successfully...\n', i))
   cat(sprintf('Interation finished at %s...\n', as.character(Sys.time())))
 }
 
-
-###
-
-stopCluster(cl)
 toc_forward <- proc.time()
 time_usage_forward <- toc_forward - tic_forward
 time_usage_forward
-gom_backup = gom
+
+stopCluster(cl_forward)
+
+cat(sprintf('Forward projection was executed successfully at %s...\n', as.character(Sys.time())))
+cat('#-------------------------------------------#\n')
+
 
 
 
