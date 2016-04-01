@@ -21,7 +21,6 @@ options("scipen"=100)
 #################################################################################################
 
 
-## Loading drilling info data set here.
 permian <- partition_load('PERMIAN BASIN', part_num = 10)
 
 #------------#
@@ -46,7 +45,7 @@ cutoff_date <- as.Date(max(permian[,prod_date]))
 
 
 ## Load decline rate data for all basins here.
-#dcl_all <- dbGetQuery(base, "select * from dev.zsz_permian_adj_log_dcl")
+#dcl_all <- dbGetQuery(base, "select * from dev.zxw_nd_adj_log_dcl")
 # dcl_all <- fread('C:/Users/Xiao Wang/Desktop/Programs/Projects/Prod_CO_WY/dcl_all_simple.csv')
 dcl_all <- as.data.table(dcl_all)
 setkey(dcl_all, basin, first_prod_year)
@@ -201,7 +200,7 @@ for (i in 1:15) {
                    
                    select entity_id
                    from t1
-                   where avg >= round(20/30,4)")
+                   where avg >= 20")
   
   forward = as.data.table(forward)
   permian_last = permian[last_prod_date == prod_date, ]
@@ -222,7 +221,7 @@ for (i in 1:15) {
                          
                          select entity_id
                          from t1
-                         where avg < round(20/30,4) and avg > 0")
+                         where avg < 20 and avg > 0")
   forward_const <- as.data.table(forward_const)
   const_forward_dt = permian_last[entity_id %in% forward_const[, entity_id], ]
   
@@ -271,7 +270,6 @@ stopCluster(cl_forward)
 
 cat(sprintf('Forward projection was executed successfully at %s...\n', as.character(Sys.time())))
 cat('#-------------------------------------------#\n')
-
 #-------------------------------------------------------------
 # Part Four -- New production prediction
 #-------------------------------------------------------------
@@ -473,7 +471,7 @@ for (i in 1:20) {
     # update the updated production
     temp <- new_first_prod[i,]
     
-    if(new_first_prod[i,1] < cutoff_date) {
+    if(new_first_prod[i,1] <= cutoff_date) {
       temp <- new_first_prod[i,]
     } else {# j = j + 1
       for (j in 1:20) {
