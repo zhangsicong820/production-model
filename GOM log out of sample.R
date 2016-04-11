@@ -12,9 +12,10 @@ pgsql <- JDBC("org.postgresql.Driver", "C:/postgresql-9.2-1003.jdbc4.jar", "`")
 base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
                 user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
 
-dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-54-225-92-149.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
-                      user="uagv4d92665mm0",
-                      password="pevkvfmdcjuddh8tc2sq81rnm0r")
+
+dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-23-21-136-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                      user="uc52v8enn6qvod",
+                      password="p36h60963tc5mbf1td3ta08ufa0")
 
 source("C:/Users/clipper/Desktop/clipper/R/SourceCodeBackUp/function_source.R")
 
@@ -296,30 +297,36 @@ colnames(new_first_prod)<-c('prod_date', 'prod');
 
 
 
+
 #----------------------------------------------------------------------------------------#
 ### Calculate the state average decline rate.
-#monthly_prod = plyr::ddply(gom, .(prod_date, basin), summarise, basin_prod = sum(liq)/1000) %>>% as.data.table()
+monthly_prod = plyr::ddply(PRODUCTION, .(prod_date, basin), summarise, basin_prod = sum(liq)/1000) %>>% as.data.table()
 # Using the last five months production to calulate their weights.
-#prod_subset = monthly_prod[(prod_date <= '2014-12-01' & prod_date >= '2014-07-01'), ]
-#prod_subset[, basin_prod := basin_prod/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days"))]
+prod_subset = monthly_prod[(prod_date <= cutoff_date & prod_date >= as.character(format(as.Date(cutoff_date) - 28*5,'%Y-%m-01'))), ]
+prod_subset[, basin_prod := basin_prod/as.numeric(as.Date(format(as.Date(prod_date) + 32,'%Y-%m-01')) - as.Date(prod_date), units = c("days"))]
 # Calculate the state total production
-#state_total = plyr::ddply(prod_subset, .(prod_date), summarise, state_prod = sum(basin_prod))
-#weight = sqldf("select a.*, round(basin_prod/state_prod,6) weight from prod_subset a, state_total b
-#               where a.prod_date = b.prod_date")
+state_total = plyr::ddply(prod_subset, .(prod_date), summarise, state_prod = sum(basin_prod))
+weight = sqldf("select a.*, round(basin_prod/state_prod,6) weight from prod_subset a, state_total b
+               where a.prod_date = b.prod_date")
 # Using the last five months' weights to calculate the average weight.
-#avg_weight = plyr::ddply(weight, .(basin), summarise, avg_weight = mean(weight)) %>>%
-#  as.data.table()
+avg_weight = plyr::ddply(weight, .(basin), summarise, avg_weight = mean(weight)) %>>%
+  as.data.table()
 
-#dcl_weight_avg = dcl
-#basin_name_ = avg_weight$basin
-#for(i in 1:length(basin_name_)){
-#  dcl_weight_avg[basin == basin_name_[i], weighted_avg:= avg*avg_weight[basin == basin_name_[i], avg_weight]]
-#}
+# using the average decline rate of last four years' (2012- 2015)
+# to make forward projection for new production .
+dcl_year_avg <- dcl[first_prod_year %in% c(2012:2015) & n_mth <= 20, .(avg = mean(avg)), by = .(basin, n_mth)]
+
+dcl_weight_avg = dcl_year_avg
+basin_name_ = avg_weight$basin
+
+for(i in 1:length(basin_name_)){
+  dcl_weight_avg[basin == basin_name_[i], .(avg = avg*avg_weight[basin == basin_name_[i], avg_weight])]
+}
 
 # calculate the weighted average decline rate for each first_prod_year and n_mth combination.
-#dcl_state_avg <- plyr::ddply(dcl_weight_avg, .(first_prod_year, n_mth), summarise, avg = sum(weighted_avg))
-#dcl_state_avg <- as.data.table(dcl_state_avg)
-#setkey(dcl_state_avg, first_prod_year, n_mth)
+dcl_state_avg <- plyr::ddply(dcl_weight_avg, .(n_mth), summarise, avg = sum(avg))
+dcl_state_avg <- as.data.table(dcl_state_avg)
+setkey(dcl_state_avg, n_mth)
 
 ## prod from new wells and 15 month forward
 test <- updated_prod
@@ -371,10 +378,10 @@ for (i in 1:20) {
         temp[m+1, 1] <- as.character(format(as.Date(temp$prod_date[j])+32,'%Y-%m-01'))
         
         if(j < max(dcl$n_mth[dcl$first_prod_year == max(dcl$first_prod_year)])) {
-          dcl_factor <- 10^(dcl[first_prod_year == max(first_prod_year) & n_mth == (j + 1), avg]/100)
+          dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == (j + 1), avg]/100)
           temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
         } else {
-          dcl_factor <- 10^(dcl[first_prod_year == max(first_prod_year) & n_mth == max(dcl_state_avg[first_prod_year == max(first_prod_year), n_mth]), avg]/100)
+          dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == max(dcl_state_avg[first_prod_year == max(first_prod_year), n_mth]), avg]/100)
           temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
         }
       }
