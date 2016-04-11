@@ -12,8 +12,11 @@ pgsql <- JDBC("org.postgresql.Driver", "C:/postgresql-9.2-1003.jdbc4.jar", "`")
 base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
                 user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
 
-dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-54-243-198-3.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
-                      user="u95mf00g8knim4",password="p4jm2l990uj4hl92dh9abf6qmkr")
+
+dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-23-21-136-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                      user="uc52v8enn6qvod",
+                      password="p36h60963tc5mbf1td3ta08ufa0")
+
 
 options("scipen"=100)
 options(stringsAsFactors = F)
@@ -23,8 +26,24 @@ options(stringsAsFactors = F)
 print(Sys.time())
 
 ## decline rate for all basins
-dcl_all <- dbGetQuery(dev_base, "select * from zsz.crd_prod_dcl_log")
+#dcl_all <- dbGetQuery(dev_base, "select * from zxw.crd_prod_log_dcl_jan where basin = 'PERMIAN BASIN'")
 
+#out of sample
+dcl_all <- dbGetQuery(dev_base, "with t0 as (
+                      select * 
+                      from zxw.crd_prod_log_dcl_jan 
+                      where basin in ('GOM - DEEPWATER', 'GOM - SHELF') and first_prod_year != 2015),
+                      
+                      t1 as (
+                      select basin, first_prod_year, max(n_mth) as max
+                      from t0
+                      group by basin, first_prod_year
+                      order by 1, 2)
+                      
+                      select distinct a.*
+                      from t0 a join t1 b on a.first_prod_year = b.first_prod_year
+                      where a.n_mth < b.max - 12
+                      order by 2,3")
 
 ## distinct first production year
 first_prod_year <- sqldf("select distinct basin, first_prod_year from dcl_all order by 1")
@@ -38,10 +57,10 @@ basin_max_mth_table <- sqldf("select basin, first_prod_year, max(n_mth) as max, 
                         group by basin, first_prod_year
                         order by 1, 2")
 ## latest_prod_year
-latest_year <- dbGetQuery(base, "select extract(year from date_trunc('month', current_date - interval '3 month')::DATE)")
+latest_year <- 2014 #dbGetQuery(base, "select extract(year from date_trunc('month', current_date - interval '3 month')::DATE)")
 
 ## latest_prod_month
-latest_mth <- dbGetQuery(base, "select extract(month from date_trunc('month', current_date - interval '3 month')::DATE)")
+latest_mth <- 12 #dbGetQuery(base, "select extract(month from date_trunc('month', current_date - interval '3 month')::DATE)")
 
 #create a table of all # of mth of prod for each start year, and basin
 mths <- as.data.frame(matrix(nrow = 0, ncol = 3));
@@ -89,7 +108,7 @@ if (nrow(missing_dcl) == 0) {
     
     sql <- sprintf("select avg(avg) as avg
                   from dcl_all
-                  where basin = '%s' and first_prod_year = '%s' and n_mth > '%s' - 7 and n_mth <= '%s' - 1 ", missing_dcl[l,1], missing_dcl[l,2], missing_dcl[l,3], missing_dcl[l,3])
+                  where basin = '%s' and first_prod_year >= '%s' - 3 and n_mth = '%s'", missing_dcl[l,1], missing_dcl[l,2], missing_dcl[l,3])
     
     dcl_all[n+1, 4] <- sqldf(sql)
   }
@@ -99,10 +118,10 @@ if (nrow(missing_dcl) == 0) {
 
 
 ## most recent 12 month avg decline rate for each basin, each year
-dcl_all_avg12 <- sqldf("select a.basin, a.first_prod_year, case when avg(avg) >= 0 then 0 else avg(avg) end as avg 
-                        from dcl_all a left join basin_max_mth_table b on a.basin = b.basin and a.first_prod_year = b.first_prod_year
-                        where a.n_mth > b.max - 25 and a.n_mth != b.max
-                        group by a.basin, a.first_prod_year")
+#dcl_all_avg12 <- sqldf("select a.basin, a.first_prod_year, case when avg(avg) >= 0 then 0 else avg(avg) end as avg 
+#                        from dcl_all a left join basin_max_mth_table b on a.basin = b.basin and a.first_prod_year = b.first_prod_year
+#                        where a.n_mth > b.max - 25 and a.n_mth != b.max
+#                        group by a.basin, a.first_prod_year")
 
 
 
@@ -115,7 +134,7 @@ for (k in (1:nrow(basin_all))) {
   years <- first_prod_year$first_prod_year[first_prod_year$basin == basin]
   
   ## first prod year with less than 36 months produced
-  replace <- basin_max_mth_table[basin_max_mth_table$basin == basin & basin_max_mth_table$max < 36,]
+  #replace <- basin_max_mth_table[basin_max_mth_table$basin == basin & basin_max_mth_table$max < 36,]
   
 
  
@@ -127,29 +146,37 @@ for (k in (1:nrow(basin_all))) {
     year <- temp$first_prod_year[1]
     #max mth produced in temp
     m <- max(temp$n_mth)
-    #latest dcl in temp
-    max_mth_avg <- temp$avg[temp$n_mth == m]
+
     
-    if (year %in% replace$first_prod_year) {
+    sql <- sprintf("select basin, '%s' as first_prod_year, n_mth, avg(avg) as avg
+                    from dcl_all
+                    where basin = '%s' and first_prod_year >= '%s' - 3 and n_mth > '%s' and n_mth <= '%s'
+                    group by basin, n_mth
+                    order by 1,2,3",year, basin, year, m, m + 20)
+    
+    dcl_all <- rbind(dcl_all, sqldf(sql))
+    
+ 
+#    if (year %in% replace$first_prod_year) {
       
-      sql <- sprintf("select basin, first_prod_year + 1 as first_prod_year, n_mth, avg 
-                      from dcl_all
-                      where basin = '%s' and first_prod_year = '%s' - 1 and n_mth > '%s' and n_mth <= '%s'", basin, year, replace$max[replace$first_prod_year == year], replace$max_new[replace$first_prod_year == year])
-      dcl_all <- rbind(dcl_all, sqldf(sql))
+#     sql <- sprintf("select basin, first_prod_year + 1 as first_prod_year, n_mth, avg 
+#                      from dcl_all
+#                      where basin = '%s' and first_prod_year = '%s' - 1 and n_mth > '%s' and n_mth <= '%s'", basin, year, replace$max[replace$first_prod_year == year], replace$max_new[replace$first_prod_year == year])
+#      dcl_all <- rbind(dcl_all, sqldf(sql))
       
-    } else {
-      for (g in 1:20) {
-        n <- nrow(dcl_all)
-        dcl_all[n+1, 1] <- temp$basin[1]
-        dcl_all[n+1, 2] <- temp$first_prod_year[1]
-        dcl_all[n+1, 3] <- max(temp$n_mth) + g
-        if(max_mth_avg < 0) {
-          dcl_all[n+1, 4] <- temp$avg[temp$n_mth == m]
-        } else {
-          dcl_all[n+1, 4] <- dcl_all_avg12$avg[dcl_all_avg12$basin == basin & dcl_all_avg12$first_prod_year == year]
-        }
-      }
-    }
+#    } else {
+#      for (g in 1:20) {
+#        n <- nrow(dcl_all)
+#        dcl_all[n+1, 1] <- temp$basin[1]
+#        dcl_all[n+1, 2] <- temp$first_prod_year[1]
+#        dcl_all[n+1, 3] <- max(temp$n_mth) + g
+#        if(max_mth_avg < 0) {
+#          dcl_all[n+1, 4] <- temp$avg[temp$n_mth == m]
+#        } else {
+#          dcl_all[n+1, 4] <- dcl_all_avg12$avg[dcl_all_avg12$basin == basin & dcl_all_avg12$first_prod_year == year]
+#        }
+#      }
+#    }
   }
 }
 
