@@ -12,8 +12,9 @@ pgsql <- JDBC("org.postgresql.Driver", "C:/postgresql-9.2-1003.jdbc4.jar", "`")
 base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
                 user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
 
-dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-54-243-198-3.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
-                      user="u95mf00g8knim4",password="p4jm2l990uj4hl92dh9abf6qmkr")
+dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-54-225-92-149.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                      user="uagv4d92665mm0",
+                      password="pevkvfmdcjuddh8tc2sq81rnm0r")
 
 source("C:/Users/clipper/Desktop/clipper/R/SourceCodeBackUp/function_source.R")
 
@@ -21,7 +22,7 @@ options("scipen"=100)
 #################################################################################################
 
 
-permian <- partition_load('PERMIAN BASIN', part_num = 10)
+permian <- partition_load("('PERMIAN BASIN')", part_num = 10)
 
 #------------#
 cat('Production data was loaded successfully...\n')
@@ -125,11 +126,12 @@ cat(sprintf('Start filling missing values at %s...\n',as.character(Sys.time())))
 missing <- sqldf("with t0 as (
                  select entity_id, avg(liq) as avg
                  from permian
+                 where comment != 'All Zeros'
                  group by entity_id)
                  
                  select *
                  from permian
-                 where entity_id in (select entity_id from t0 where avg >= round(20/30,4)) 
+                 where entity_id in (select entity_id from t0 where avg >= 15) 
                  and prod_date = last_prod_date")
 
 missing <- subset(missing, last_prod_date < cutoff_date)
@@ -145,7 +147,7 @@ permian[, prod_date := as.character(prod_date)]
 ## Main program.
 tic_missing = proc.time()
 fill_miss = foreach(i = 1:nrow(missing), .combine = rbind, .packages = 'data.table') %dopar%
-  filling_missing(i)
+  filling_missing(i, cutoff_date)
 
 setkey(fill_miss, entity_id, n_mth)
 # Update last_prod_date for entities who are filled.
@@ -200,7 +202,7 @@ for (i in 1:15) {
                    
                    select entity_id
                    from t1
-                   where avg >= 20")
+                   where avg >= 15")
   
   forward = as.data.table(forward)
   permian_last = permian[last_prod_date == prod_date, ]
@@ -221,7 +223,7 @@ for (i in 1:15) {
                          
                          select entity_id
                          from t1
-                         where avg < 20 and avg > 0")
+                         where avg < 15 and avg > 0.667")
   forward_const <- as.data.table(forward_const)
   const_forward_dt = permian_last[entity_id %in% forward_const[, entity_id], ]
   
@@ -397,12 +399,6 @@ prod <-  plyr::ddply(permian, 'prod_date', summarise, prod = sum(liq)/1000)
 
 updated_prod <- prod[prod$prod_date > max(hist_prod$prod_date),]
 
-first_prod <- dbGetQuery(base, "select prod_date, round(sum(liq)/1000/(extract(days from (prod_date + interval '1 month' - prod_date))),0) as prod
-                         from di.pden_desc a join di.pden_prod b on a.entity_id = b.entity_id
-                         where liq_cum >0 and prod_date >= '2013-12-01' and ALLOC_PLUS IN ('Y','X') and liq >= 0 
-                         and basin = 'PERMIAN BASIN' and prod_date >= date_trunc('month', current_date)::DATE - interval '5 month' and prod_date = first_prod_date
-                         group by prod_date
-                         order by 1")
 
 new_first_prod <- as.data.frame(matrix(nrow = 15, ncol = 2));
 colnames(new_first_prod)<-c('prod_date', 'prod');
@@ -471,34 +467,32 @@ for (i in 1:20) {
     # update the updated production
     temp <- new_first_prod[i,]
     
-    if(new_first_prod[i,1] <= cutoff_date) {
-      temp <- new_first_prod[i,]
-    } else {# j = j + 1
-      for (j in 1:20) {
-        if(as.Date(format(as.Date(min(temp$prod_date))+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
-        {
-          break
-        }
-        if(as.Date(format(as.Date(min(temp$prod_date))+32*j,'%Y-%m-01'))<= as.Date(max(prod$prod_date)))
-        {
-          m = nrow(temp)
-          temp[m+1, 1] <- as.character(format(as.Date(temp$prod_date[j])+32,'%Y-%m-01'))
-          
-          if(j < max(dcl$n_mth[dcl$first_prod_year == max(dcl$first_prod_year)])) {
-            dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == (j + 1), avg]/100)
-            temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
-          } else {
-            dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == max(dcl_state_avg[first_prod_year == max(first_prod_year), n_mth]), avg]/100)
-            temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
-          }
+    
+    for (j in 1:20) {
+      if(as.Date(format(as.Date(min(temp$prod_date))+32*j,'%Y-%m-01')) > as.Date(max(prod$prod_date)))
+      {
+        break
+      }
+      if(as.Date(format(as.Date(min(temp$prod_date))+32*j,'%Y-%m-01'))<= as.Date(max(prod$prod_date)))
+      {
+        m = nrow(temp)
+        temp[m+1, 1] <- as.character(format(as.Date(temp$prod_date[j])+32,'%Y-%m-01'))
+        
+        if(j < max(dcl$n_mth[dcl$first_prod_year == max(dcl$first_prod_year)])) {
+          dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == (j + 1), avg]/100)
+          temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
+        } else {
+          dcl_factor <- 10^(dcl_state_avg[first_prod_year == max(first_prod_year) & n_mth == max(dcl_state_avg[first_prod_year == max(first_prod_year), n_mth]), avg]/100)
+          temp[m+1, 2] <- round((1 + temp$prod[m]) * dcl_factor - 1,0)
         }
       }
     }
     
     
+    
     #temp$prod_date <- as.Date(temp$prod_date)
     sql_query <- sprintf("select a.*, coalesce(b.prod, 0) as prod%s
-                  from test a left join temp b on a.prod_date = b.prod_date", i)
+                         from test a left join temp b on a.prod_date = b.prod_date", i)
     
     test <- sqldf(sql_query)
     
@@ -509,12 +503,7 @@ for (i in 1:20) {
     
     ## new total production
     hist_prod[n+1,1] <- as.character(format(as.Date(hist_prod$prod_date[n]+32),'%Y-%m-01')) 
-    hist_prod[n+1,2] <- round(updated_prod$prod[updated_prod$prod_date == hist_prod$prod_date[(n+1)]]
-                              - if (length(first_prod$prod[first_prod$prod_date == hist_prod[n+1,1]]) == 0) {
-                                0
-                              } else {
-                                first_prod$prod[first_prod$prod_date == hist_prod[n+1,1]]
-                              }, 0)
+    hist_prod[n+1,2] <- round(updated_prod$prod[updated_prod$prod_date == hist_prod$prod_date[(n+1)]], 0)
   }
 }
 
