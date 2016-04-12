@@ -26,27 +26,27 @@ options(stringsAsFactors = F)
 print(Sys.time())
 
 ## decline rate for all basins
-#dcl_all <- dbGetQuery(dev_base, "select * from zxw.crd_prod_log_dcl_jan where basin = 'PERMIAN BASIN'")
+dcl_all <- dbGetQuery(dev_base, "select * from zxw.crd_prod_log_dcl_1977 order by 1,2,3 ")
 
 #out of sample
-dcl_all <- dbGetQuery(dev_base, "with t0 as (
-                      select * 
-                      from zxw.crd_prod_log_dcl_jan 
-                      where basin in ('GOM - DEEPWATER', 'GOM - SHELF') and first_prod_year != 2015),
+#dcl_all <- dbGetQuery(dev_base, "with t0 as (
+#                      select * 
+#                      from zxw.crd_prod_log_dcl_1977
+#                      where first_prod_year != 2015),
+#                      
+#                      t1 as (
+#                      select basin, first_prod_year, max(n_mth) as max
+#                      from t0
+#                      group by basin, first_prod_year
+#                      order by 1, 2)
                       
-                      t1 as (
-                      select basin, first_prod_year, max(n_mth) as max
-                      from t0
-                      group by basin, first_prod_year
-                      order by 1, 2)
-                      
-                      select distinct a.*
-                      from t0 a join t1 b on a.first_prod_year = b.first_prod_year
-                      where a.n_mth < b.max - 12
-                      order by 2,3")
+#                      select distinct a.*
+#                      from t0 a join t1 b on a.first_prod_year = b.first_prod_year
+#                      where a.n_mth < b.max - 12
+#                      order by 2,3")
 
 ## distinct first production year
-first_prod_year <- sqldf("select distinct basin, first_prod_year from dcl_all order by 1")
+first_prod_year <- sqldf("select distinct basin, first_prod_year from dcl_all where first_prod_year >= 1980 order by 1, 2")
 
 ## distinct basins
 basin_all <- sqldf("select distinct basin from dcl_all order by 1")
@@ -54,13 +54,16 @@ basin_all <- sqldf("select distinct basin from dcl_all order by 1")
 ## max decline rate for each basin each year
 basin_max_mth_table <- sqldf("select basin, first_prod_year, max(n_mth) as max, max(n_mth) + 20 as max_new
                         from dcl_all
+                        --where first_prod_year >= 1980
                         group by basin, first_prod_year
                         order by 1, 2")
+
+
 ## latest_prod_year
-latest_year <- 2014 #dbGetQuery(base, "select extract(year from date_trunc('month', current_date - interval '3 month')::DATE)")
+latest_year <- dbGetQuery(base, "select extract(year from date_trunc('month', current_date - interval '3 month')::DATE)")
 
 ## latest_prod_month
-latest_mth <- 12 #dbGetQuery(base, "select extract(month from date_trunc('month', current_date - interval '3 month')::DATE)")
+latest_mth <- dbGetQuery(base, "select extract(month from date_trunc('month', current_date - interval '3 month')::DATE)")
 
 #create a table of all # of mth of prod for each start year, and basin
 mths <- as.data.frame(matrix(nrow = 0, ncol = 3));
@@ -117,13 +120,6 @@ if (nrow(missing_dcl) == 0) {
 
 
 
-## most recent 12 month avg decline rate for each basin, each year
-#dcl_all_avg12 <- sqldf("select a.basin, a.first_prod_year, case when avg(avg) >= 0 then 0 else avg(avg) end as avg 
-#                        from dcl_all a left join basin_max_mth_table b on a.basin = b.basin and a.first_prod_year = b.first_prod_year
-#                        where a.n_mth > b.max - 25 and a.n_mth != b.max
-#                        group by a.basin, a.first_prod_year")
-
-
 
 ## loop through all basins
 for (k in (1:nrow(basin_all))) {
@@ -133,11 +129,7 @@ for (k in (1:nrow(basin_all))) {
   ## all first prod year for basin
   years <- first_prod_year$first_prod_year[first_prod_year$basin == basin]
   
-  ## first prod year with less than 36 months produced
-  #replace <- basin_max_mth_table[basin_max_mth_table$basin == basin & basin_max_mth_table$max < 36,]
-  
 
- 
   ## forward 15 month
   for (h in (1:length(years))) {
     
@@ -150,34 +142,28 @@ for (k in (1:nrow(basin_all))) {
     
     sql <- sprintf("select basin, '%s' as first_prod_year, n_mth, avg(avg) as avg
                     from dcl_all
-                    where basin = '%s' and first_prod_year >= '%s' - 3 and n_mth > '%s' and n_mth <= '%s'
+                    where basin = '%s' and first_prod_year >= ('%s' - 3) and first_prod_year < '%s' and n_mth > '%s' and n_mth <= '%s'
                     group by basin, n_mth
-                    order by 1,2,3",year, basin, year, m, m + 20)
+                    order by 1,2,3",year, basin, year, year, m, m + 20)
     
-    dcl_all <- rbind(dcl_all, sqldf(sql))
+    dcl_ext <- sqldf(sql)
     
- 
-#    if (year %in% replace$first_prod_year) {
+    if (nrow(dcl_ext) < 20) {
+      sql1 <- sprintf("select basin, first_prod_year, n_mth + 24 as n_mth, avg
+                     from dcl_all
+                     where basin = '%s' and first_prod_year = '%s' and n_mth > '%s' and n_mth <= '%s'
+                     group by basin, n_mth
+                     order by 1,2,3", basin, year, m - 24, m )
       
-#     sql <- sprintf("select basin, first_prod_year + 1 as first_prod_year, n_mth, avg 
-#                      from dcl_all
-#                      where basin = '%s' and first_prod_year = '%s' - 1 and n_mth > '%s' and n_mth <= '%s'", basin, year, replace$max[replace$first_prod_year == year], replace$max_new[replace$first_prod_year == year])
-#      dcl_all <- rbind(dcl_all, sqldf(sql))
+      dcl_ext1 <- sqldf(sql1)
       
-#    } else {
-#      for (g in 1:20) {
-#        n <- nrow(dcl_all)
-#        dcl_all[n+1, 1] <- temp$basin[1]
-#        dcl_all[n+1, 2] <- temp$first_prod_year[1]
-#        dcl_all[n+1, 3] <- max(temp$n_mth) + g
-#        if(max_mth_avg < 0) {
-#          dcl_all[n+1, 4] <- temp$avg[temp$n_mth == m]
-#        } else {
-#          dcl_all[n+1, 4] <- dcl_all_avg12$avg[dcl_all_avg12$basin == basin & dcl_all_avg12$first_prod_year == year]
-#        }
-#      }
-#    }
-  }
+      dcl_all <- rbind(dcl_all, dcl_ext1)
+    }else {
+      dcl_all <- rbind(dcl_all, dcl_ext)
+    }
+    
+    
+  
 }
 
 
