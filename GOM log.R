@@ -12,8 +12,9 @@ pgsql <- JDBC("org.postgresql.Driver", "C:/postgresql-9.2-1003.jdbc4.jar", "`")
 base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
                 user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
 
-dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-54-243-198-3.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
-                      user="u95mf00g8knim4",password="p4jm2l990uj4hl92dh9abf6qmkr")
+dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-23-21-136-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
+                      user="uc52v8enn6qvod",
+                      password="p36h60963tc5mbf1td3ta08ufa0")
 
 source("C:/Users/clipper/Desktop/clipper/R/SourceCodeBackUp/function_source.R")
 
@@ -26,10 +27,8 @@ cat('Production data was loaded successfully...\n')
 
 ## Change data struture into data.table
 
-deepwater <- partition_load("GOM - DEEPWATER", 10)
-shelf <- partition_load("GOM - SHELF", 10)
+gom <- partition_load("('GOM - DEEPWATER')", 10)
 
-gom <- as.data.frame(rbind(deepwater, shelf))
 gom <- as.data.table(gom)
 ## Set keys for faster searching.
 setkey(gom, entity_id, basin, first_prod_year)

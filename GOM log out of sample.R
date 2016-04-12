@@ -12,7 +12,6 @@ pgsql <- JDBC("org.postgresql.Driver", "C:/postgresql-9.2-1003.jdbc4.jar", "`")
 base<-dbConnect(pgsql, "jdbc:postgresql://ec2-54-204-4-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
                 user="u9dhckqe2ga9v1",password="pa49dck9aopgfrahuuggva497mh")
 
-
 dev_base <- dbConnect(pgsql, "jdbc:postgresql://ec2-23-21-136-247.compute-1.amazonaws.com:5432/d43mg7o903brjv?ssl=true&sslfactory=org.postgresql.ssl.NonValidatingFactory&",
                       user="uc52v8enn6qvod",
                       password="p36h60963tc5mbf1td3ta08ufa0")
@@ -121,18 +120,18 @@ for (i in 1:15) {
   
   # Making forward projection parallelly.
   # Cluster need to be set before.
-  forward_liq_proj = foreach(j = 1:nrow(forward_dt), .combine = c, .packages = 'data.table') %dopar% 
+  temp_gom_forward = foreach(j = 1:nrow(forward_dt), .combine = rbind, .packages = 'data.table') %dopar% 
     forward_liq_func(j)
   
   ### Except liq and last_prod_date, changing the other columns outside the long iterations.
   ## entity_id, basin, first_prod_year remain the same.
   ## Only update values for last_prod_date, n_mth, prod_date, comment
-  temp_gom_forward = forward_dt
-  temp_gom_forward[, last_prod_date:= as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
-  temp_gom_forward[, n_mth:= (n_mth + 1)]
-  temp_gom_forward[, prod_date:= as.character(format(as.Date(prod_date)+32,'%Y-%m-01'))]
-  temp_gom_forward[, comment:= "Inserted"]
-  temp_gom_forward[, liq:= forward_liq_proj]
+#  temp_gom_forward = forward_dt
+#  temp_gom_forward[, last_prod_date:= as.character(format(as.Date(last_prod_date)+32,'%Y-%m-01'))]
+#  temp_gom_forward[, n_mth:= (n_mth + 1)]
+#  temp_gom_forward[, prod_date:= as.character(format(as.Date(prod_date)+32,'%Y-%m-01'))]
+#  temp_gom_forward[, comment:= "Inserted"]
+#  temp_gom_forward[, liq:= forward_liq_proj]
   
   
   ### data table to store all the entities with constant forward production.
@@ -164,6 +163,8 @@ stopCluster(cl_forward)
 
 cat(sprintf('Forward projection was executed successfully at %s...\n', as.character(Sys.time())))
 cat('#-------------------------------------------#\n')
+
+plyr::ddply(gom, 'prod_date', summarise, prod = sum(liq)/1000)
 #-------------------------------------------------------------
 # Part Four -- New production prediction
 #-------------------------------------------------------------
